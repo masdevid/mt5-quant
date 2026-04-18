@@ -48,7 +48,7 @@ cp "$PROJECT_ROOT/config/mt5-quant.example.yaml" "$PACKAGE_DIR/config/"
 
 # Copy docs
 cp "$PROJECT_ROOT/README.md" "$PACKAGE_DIR/"
-cp "$PROJECT_ROOT/WINDSURF_SETUP.md" "$PACKAGE_DIR/"
+cp "$PROJECT_ROOT/docs/WINDSURF.md" "$PACKAGE_DIR/WINDSURF_SETUP.md"
 cp "$PROJECT_ROOT/CLAUDE.md" "$PACKAGE_DIR/"
 
 # Create tarball
