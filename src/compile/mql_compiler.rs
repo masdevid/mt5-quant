@@ -56,17 +56,19 @@ impl MqlCompiler {
             sync.dest_mq5.display()
         );
 
-        // MetaEditor always writes to MQL5/compile.log (ignores /log: arg).
-        // Clear it before compile so we only see output from this run.
-        let mql5_log = mt5_dir.join("MQL5").join("compile.log");
-        let _ = fs::remove_file(&mql5_log);
-
         let log_path = wine_prefix.join("drive_c").join("_mt5mcp_compile.log");
+        let _ = fs::remove_file(&log_path); // clear stale log before compile
+
         self.run_metaeditor(wine_exe, &wine_prefix, &metaeditor, &sync.dest_mq5, &log_path)?;
 
-        // Read from MQL5/compile.log (MetaEditor's actual output location).
-        let log_text = Self::read_log(&mql5_log);
-        let _ = fs::remove_file(&log_path); // clean up unused /log: output if any
+        // MetaEditor writes to the /log: path. Fallback: adjacent {ea_name}.log.
+        let log_text = if log_path.exists() {
+            Self::read_log(&log_path)
+        } else {
+            let adjacent = sync.dest_mq5.with_extension("log");
+            Self::read_log(&adjacent)
+        };
+        let _ = fs::remove_file(&log_path);
         tracing::info!("Compile log ({} chars):\n{}", log_text.len(), &log_text[..log_text.len().min(500)]);
 
         // Log format: "path : error: message" / "path : warning: message"

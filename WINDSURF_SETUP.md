@@ -41,9 +41,9 @@ In Windsurf chat, test with:
 Run verify_setup
 ```
 
-## Deployment ke Multiple Machines
+## Deployment to Multiple Machines
 
-### Build untuk Distribution
+### Build for Distribution
 ```bash
 # Build release binary
 cargo build --release
@@ -51,7 +51,7 @@ cargo build --release
 # Create tarball
 tar -czf mt5-quant-macos-arm64.tar.gz -C target/release mt5-quant
 
-# Deploy ke remote server
+# Deploy to remote server
 scp mt5-quant-macos-arm64.tar.gz user@server:~/
 ssh user@server "tar -xzf mt5-quant-macos-arm64.tar.gz -C /opt/"
 ssh user@server "ln -s /opt/mt5-quant /usr/local/bin/"
@@ -62,10 +62,10 @@ scp -r config/mt5-quant.yaml user@server:~/.config/mt5-quant/config/
 
 ### Target Machine Requirements
 - MetaTrader 5 installed (via Wine/CrossOver)
-- Config file di `~/.config/mt5-quant/config/mt5-quant.yaml`
+- Config file at `~/.config/mt5-quant/config/mt5-quant.yaml`
 - **NO Python required!**
 
-### Windsurf Config di Target Machine
+### Windsurf Config on Target Machine
 ```yaml
 mcpServers:
   mt5-quant:
@@ -80,7 +80,7 @@ mcpServers:
 3. Test executable manually: `./target/release/mt5-quant --help`
 
 ### Config not found
-Set `MT5_MCP_HOME` environment variable atau pastikan config di default location:
+Set `MT5_MCP_HOME` environment variable or ensure config is at default location:
 - macOS: `~/.config/mt5-quant/config/mt5-quant.yaml`
 
 ### Permission denied

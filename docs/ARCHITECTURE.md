@@ -33,8 +33,25 @@ MT5-Quant/
 │   │   ├── backtest.rs         # 5-stage pipeline (COMPILE→CLEAN→BACKTEST→EXTRACT→ANALYZE)
 │   │   └── stages.rs           # Pipeline stage definitions
 │   └── tools/                  # MCP tool definitions
-│       ├── definitions.rs      # 27 tool schemas
-│       └── handlers.rs         # Tool dispatch
+│       ├── definitions/        # Tool schemas (9 domain modules, 43 tools)
+│       │   ├── mod.rs
+│       │   ├── analytics.rs      # 9 analysis tools
+│       │   ├── backtest.rs       # 4 backtest tools
+│       │   ├── baseline.rs       # 1 baseline tool
+│       │   ├── experts.rs        # 4 EA/indicator/script tools
+│       │   ├── optimization.rs   # 4 optimization tools
+│       │   ├── reports.rs        # 11 report management tools
+│       │   ├── setfiles.rs       # 8 .set file tools
+│       │   └── system.rs         # 3 system tools
+│       └── handlers/             # Tool dispatch (9 domain modules)
+│           ├── mod.rs
+│           ├── analysis.rs
+│           ├── backtest.rs
+│           ├── experts.rs
+│           ├── optimization.rs
+│           ├── reports.rs
+│           ├── setfiles.rs
+│           └── system.rs
 │
 ├── scripts/
 │   ├── setup.sh                # Auto-detect Wine/MT5, write config, register MCP

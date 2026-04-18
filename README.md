@@ -34,7 +34,7 @@ Claude: [compile → clean cache → backtest → parse XML report → analyze 1
 
 ### What it covers
 
-28 MCP tools across the full EA development loop:
+43 MCP tools across the full EA development loop:
 
 ```
 list_set_files / describe_sweep / patch_set_file / set_from_optimization
@@ -235,7 +235,7 @@ DISPLAY=:99 xdpyinfo | grep dimensions
 
 ---
 
-## MCP Tools (28)
+## MCP Tools (43)
 
 ### Core workflow
 
@@ -247,6 +247,25 @@ DISPLAY=:99 xdpyinfo | grep dimensions
 | `analyze_report` | Read `analysis.json` from any report directory |
 | `compare_baseline` | Compare report vs baseline, return winner/loser verdict |
 | `compile_ea` | Compile MQL5 EA via MetaEditor |
+| `list_experts` | List all EAs in MQL5/Experts directory |
+| `list_indicators` | List all indicators in MQL5/Indicators directory |
+| `list_scripts` | List all scripts in MQL5/Scripts directory |
+| `healthcheck` | Quick server health check |
+
+### Granular Analytics (individual analysis)
+
+| Tool | Description |
+|------|-------------|
+| `analyze_monthly_pnl` | Monthly P/L breakdown only |
+| `analyze_drawdown_events` | Drawdown events and causes only |
+| `analyze_top_losses` | Worst losing deals only |
+| `analyze_loss_sequences` | Consecutive loss patterns only |
+| `analyze_position_pairs` | Position hold time and P/L pairs |
+| `analyze_direction_bias` | Buy vs Sell performance |
+| `analyze_streaks` | Win/loss streak analysis |
+| `analyze_concurrent_peak` | Peak simultaneous positions |
+
+Use these for targeted analysis, or `analyze_report` to run all at once.
 
 ### Monitoring
 
@@ -262,6 +281,8 @@ DISPLAY=:99 xdpyinfo | grep dimensions
 | Tool | Description |
 |------|-------------|
 | `list_reports` | Compact table of all runs with key metrics — no full analysis needed |
+| `get_latest_report` | Get most recent report with optional equity chart |
+| `search_reports` | Find reports by EA, symbol, date range, or profit criteria |
 | `tail_log` | Read last N lines of any log; `filter=errors` to see only failures |
 | `prune_reports` | Delete old report directories, keep last N (skips `_opt` dirs) |
 
