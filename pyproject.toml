@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mt5-quant"
+version = "0.1.0"
+description = "MCP server for MetaTrader 5 backtesting and optimization"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "mcp>=1.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+mt5-quant           = "server.main:cli"
+mt5-analyze         = "analytics.analyze:main_generic"
+mt5-analyze-grid    = "analytics.analyze:main_grid"
+mt5-analyze-scalper = "analytics.analyze:main_scalper"
+mt5-analyze-trend   = "analytics.analyze:main_trend"
+mt5-analyze-hedge   = "analytics.analyze:main_hedge"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server", "analytics"]

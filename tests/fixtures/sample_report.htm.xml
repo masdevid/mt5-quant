@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Report">
+  <Table>
+   <Row>
+    <Cell><Data ss:Type="String">Net profit</Data></Cell>
+    <Cell><Data ss:Type="Number">1234.56</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">Profit factor</Data></Cell>
+    <Cell><Data ss:Type="Number">1.25</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">Sharpe Ratio</Data></Cell>
+    <Cell><Data ss:Type="Number">0.75</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">Total trades</Data></Cell>
+    <Cell><Data ss:Type="Number">150</Data></Cell>
+   </Row>
+  </Table>
+ </Worksheet>
+ <Worksheet ss:Name="Deals">
+  <Table>
+   <Row>
+    <Cell><Data ss:Type="String">time</Data></Cell>
+    <Cell><Data ss:Type="String">type</Data></Cell>
+    <Cell><Data ss:Type="String">direction</Data></Cell>
+    <Cell><Data ss:Type="String">volume</Data></Cell>
+    <Cell><Data ss:Type="String">price</Data></Cell>
+    <Cell><Data ss:Type="String">sl</Data></Cell>
+    <Cell><Data ss:Type="String">tp</Data></Cell>
+    <Cell><Data ss:Type="String">profit</Data></Cell>
+    <Cell><Data ss:Type="String">balance</Data></Cell>
+    <Cell><Data ss:Type="String">comment</Data></Cell>
+    <Cell><Data ss:Type="String">order</Data></Cell>
+    <Cell><Data ss:Type="String">magic</Data></Cell>
+    <Cell><Data ss:Type="String">entry</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">2025.01.10 09:30:00</Data></Cell>
+    <Cell><Data ss:Type="String">buy</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+    <Cell><Data ss:Type="Number">0.01</Data></Cell>
+    <Cell><Data ss:Type="Number">1915.00</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">15.00</Data></Cell>
+    <Cell><Data ss:Type="Number">10015.00</Data></Cell>
+    <Cell><Data ss:Type="String">Layer #1</Data></Cell>
+    <Cell><Data ss:Type="Number">1001</Data></Cell>
+    <Cell><Data ss:Type="Number">12345</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">2025.01.15 10:45:00</Data></Cell>
+    <Cell><Data ss:Type="String">sell</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+    <Cell><Data ss:Type="Number">0.01</Data></Cell>
+    <Cell><Data ss:Type="Number">1920.00</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">-10.00</Data></Cell>
+    <Cell><Data ss:Type="Number">10005.00</Data></Cell>
+    <Cell><Data ss:Type="String">Layer #1</Data></Cell>
+    <Cell><Data ss:Type="Number">1002</Data></Cell>
+    <Cell><Data ss:Type="Number">12345</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+   </Row>
+   <Row>
+    <Cell><Data ss:Type="String">2025.02.05 14:00:00</Data></Cell>
+    <Cell><Data ss:Type="String">sell</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+    <Cell><Data ss:Type="Number">0.01</Data></Cell>
+    <Cell><Data ss:Type="Number">1945.00</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">0</Data></Cell>
+    <Cell><Data ss:Type="Number">-15.00</Data></Cell>
+    <Cell><Data ss:Type="Number">10020.00</Data></Cell>
+    <Cell><Data ss:Type="String">Layer #1</Data></Cell>
+    <Cell><Data ss:Type="Number">1005</Data></Cell>
+    <Cell><Data ss:Type="Number">12345</Data></Cell>
+    <Cell><Data ss:Type="String">out</Data></Cell>
+   </Row>
+  </Table>
+ </Worksheet>
+</Workbook>

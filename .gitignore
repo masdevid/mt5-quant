@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Reports (generated, not tracked)
+reports/20*/
+reports/*_opt/
+
+# Job metadata
+.mt5mcp_jobs/
+
+# Config (contains local paths)
+config/mt5-quant.yaml
+config/baseline.json
+config/backtest_history.json
+
+# Claude Code (personal, not for repo)
+CLAUDE.md
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+/tmp/mt5opt_*
