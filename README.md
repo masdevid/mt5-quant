@@ -58,16 +58,31 @@ The AI drives every step. You watch and approve.
 
 ## Quickstart
 
-### 1. Clone and install
+### Option 1: Download Prebuilt Binary (Recommended)
+
+```bash
+# macOS (Apple Silicon)
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-macos-arm64.tar.gz
+tar -xzf mt5-quant.tar.gz
+cd mt5-quant-macos-arm64
+./mt5-quant --help
+
+# Linux (x64)
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-linux-x64.tar.gz
+tar -xzf mt5-quant.tar.gz
+cd mt5-quant-linux-x64
+./mt5-quant --help
+```
+
+### Option 2: Build from Source
 
 ```bash
 git clone https://github.com/masdevid/mt5-mcp
 cd mt5-mcp
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+bash scripts/build-rust.sh
 ```
 
-> **Python 3.11+** required. The venv is optional but recommended.
+> **Rust** required. Install from [rustup.rs](https://rustup.rs/)
 
 ### 2. Install MetaTrader 5
 
@@ -146,10 +161,7 @@ terminal_dir: "~/Library/Application Support/net.metaquotes.wine.metatrader5/dri
 
 ```bash
 # Add to Claude Code (adjust path to where you cloned the repo)
-claude mcp add MT5-Quant -- python3 /path/to/mt5-quant/server/main.py
-
-# Or with the venv python explicitly:
-claude mcp add MT5-Quant -- /path/to/mt5-quant/.venv/bin/python3 /path/to/mt5-quant/server/main.py
+claude mcp add MT5-Quant -- /path/to/mt5-quant/target/release/mt5-quant
 ```
 
 `setup.sh` runs this automatically. To check registration:
@@ -160,7 +172,7 @@ claude mcp list
 
 Expected output:
 ```
-MT5-Quant: python3 /path/to/mt5-quant/server/main.py
+MT5-Quant: /path/to/mt5-quant/target/release/mt5-quant
 ```
 
 **Claude Code integration files** (CLAUDE.md template + baseline hook):
@@ -297,10 +309,10 @@ Full schema: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)
 ```
 AI Agent (Claude / Cursor)
     │ MCP protocol (stdio)
-MT5-Quant server (Python)
+MT5-Quant server (Rust)
     │ subprocess
-Pipeline scripts (bash)
-    │ Wine/CrossOver
+Wine/CrossOver
+    │
 MetaTrader 5 (Windows/Wine)
     │
 analysis.json ← AI reads this
@@ -490,7 +502,7 @@ bash scripts/setup.sh --yes
 ```bash
 claude mcp list                # should show MT5-Quant
 claude mcp remove MT5-Quant   # remove stale entry if needed
-claude mcp add MT5-Quant -- python3 /absolute/path/to/mt5-quant/server/main.py
+claude mcp add MT5-Quant -- /absolute/path/to/mt5-quant/target/release/mt5-quant
 ```
 
 Use an **absolute path** — relative paths break when Claude starts from a different working directory.

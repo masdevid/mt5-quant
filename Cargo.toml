@@ -23,3 +23,5 @@ regex = "1.0"
 dirs = "5.0"
 walkdir = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
+encoding_rs = "0.8"
+tempfile = "3.0"

@@ -1,6 +1,11 @@
+mod analytics;
+mod compile;
+mod models;
+mod pipeline;
+mod tools;
+
 mod config;
 mod mcp_server;
-mod mt5;
 
 use anyhow::Result;
 use clap::Parser;
@@ -192,92 +197,3 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
     
     Ok(())
 }
-
-pub fn get_tools_list() -> Value {
-    json!([
-        {
-            "name": "verify_setup",
-            "description": "Verify MT5-Quant environment without launching MT5. Checks Wine executable, MT5 installation paths, and config file.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "list_symbols",
-            "description": "Detect the active MT5 broker session and list symbols that have local tick history available for backtesting.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "server": {
-                        "type": "string",
-                        "description": "Filter to a specific server name. If omitted, shows active server and all servers."
-                    }
-                }
-            }
-        },
-        {
-            "name": "list_experts",
-            "description": "List all compiled Expert Advisors (.ex5 files) found in the MT5 Experts directory.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "filter": {
-                        "type": "string",
-                        "description": "Optional substring filter on EA name (case-insensitive)."
-                    }
-                }
-            }
-        },
-        {
-            "name": "run_backtest",
-            "description": "Run a complete MT5 backtest pipeline.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["expert"],
-                "properties": {
-                    "expert": {
-                        "type": "string",
-                        "description": "EA name without path or extension. e.g. 'MyEA_v1.2'"
-                    },
-                    "symbol": {
-                        "type": "string",
-                        "description": "Trading symbol. Use your broker's exact name. e.g. 'XAUUSD'"
-                    },
-                    "from_date": {
-                        "type": "string",
-                        "description": "Start date in YYYY.MM.DD format"
-                    },
-                    "to_date": {
-                        "type": "string",
-                        "description": "End date in YYYY.MM.DD format"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"],
-                        "description": "Chart timeframe (default: M5)"
-                    },
-                    "deposit": {
-                        "type": "integer",
-                        "description": "Initial deposit (default: from config)"
-                    }
-                }
-            }
-        },
-        {
-            "name": "compile_ea",
-            "description": "Compile an MQL5 Expert Advisor via MetaEditor (Wine/CrossOver).",
-            "inputSchema": {
-                "type": "object",
-                "required": ["expert_path"],
-                "properties": {
-                    "expert_path": {
-                        "type": "string",
-                        "description": "Path to .mq5 source file"
-                    }
-                }
-            }
-        }
-    ])
-}
-

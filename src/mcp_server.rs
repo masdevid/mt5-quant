@@ -2,20 +2,20 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::{config::Config, mt5::Mt5Manager, McpError, McpRequest, McpResponse};
+use crate::{models::Config as ModelsConfig, tools::ToolHandler, McpError, McpRequest, McpResponse};
 
 #[derive(Debug)]
 pub struct McpServer {
     initialized: Arc<Mutex<bool>>,
-    mt5_manager: Arc<Mt5Manager>,
+    tool_handler: Arc<ToolHandler>,
 }
 
 impl McpServer {
     pub fn new() -> Self {
-        let config = Config::load().unwrap_or_default();
+        let config = ModelsConfig::load().unwrap_or_default();
         Self {
             initialized: Arc::new(Mutex::new(false)),
-            mt5_manager: Arc::new(Mt5Manager::new(config)),
+            tool_handler: Arc::new(ToolHandler::new(config)),
         }
     }
 
@@ -60,7 +60,7 @@ impl McpServer {
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
-                    result: Some(crate::get_tools_list()),
+                    result: Some(crate::tools::get_tools_list()),
                     error: None,
                 }
             }
@@ -132,66 +132,12 @@ impl McpServer {
     }
 
     async fn handle_tool_call(&self, tool_name: &str, arguments: &Value) -> Value {
-        match tool_name {
-            "verify_setup" => {
-                self.mt5_manager.verify_setup().await.unwrap_or_else(|e| json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Setup verification failed: {}", e)
-                    }],
-                    "isError": true
-                }))
-            }
-            "list_symbols" => {
-                self.mt5_manager.list_symbols().await.unwrap_or_else(|e| json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Failed to list symbols: {}", e)
-                    }],
-                    "isError": true
-                }))
-            }
-            "list_experts" => {
-                let filter = arguments.get("filter").and_then(|v| v.as_str());
-                self.mt5_manager.list_experts(filter).await.unwrap_or_else(|e| json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Failed to list experts: {}", e)
-                    }],
-                    "isError": true
-                }))
-            }
-            "run_backtest" => {
-                self.mt5_manager.run_backtest(arguments).await.unwrap_or_else(|e| json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Backtest failed: {}", e)
-                    }],
-                    "isError": true
-                }))
-            }
-            "compile_ea" => {
-                let expert_path = arguments.get("expert_path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                
-                self.mt5_manager.compile_ea(expert_path).await.unwrap_or_else(|e| json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Compilation failed: {}", e)
-                    }],
-                    "isError": true
-                }))
-            }
-            _ => {
-                json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!("Tool '{}' not found", tool_name)
-                    }],
-                    "isError": true
-                })
-            }
-        }
+        self.tool_handler.handle(tool_name, arguments).await.unwrap_or_else(|e| json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Tool execution failed: {}", e)
+            }],
+            "isError": true
+        }))
     }
 }
