@@ -22,6 +22,9 @@ config/backtest_history.json
 # Claude Code (personal, not for repo)
 CLAUDE.md
 
+# Windsurf (local workflows, not for repo)
+.windsurf/
+
 # macOS
 .DS_Store
 
