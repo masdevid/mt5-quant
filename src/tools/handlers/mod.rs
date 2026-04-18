@@ -11,6 +11,7 @@ mod optimization;
 mod analysis;
 mod setfiles;
 mod reports;
+mod data;
 
 #[derive(Debug)]
 pub struct ToolHandler {
@@ -68,6 +69,11 @@ impl ToolHandler {
             "set_from_optimization" => setfiles::handle_set_from_optimization(args).await,
             "describe_sweep" => setfiles::handle_describe_sweep(args).await,
             "list_set_files" => setfiles::handle_list_set_files(&self.config).await,
+            
+            // Data export handlers
+            "export_ohlc" => data::handle_export_ohlc(&self.config, args).await,
+            "export_ticks" => data::handle_export_ticks(&self.config, args).await,
+            "list_available_data" => data::handle_list_available_data(&self.config, args).await,
             
             // Report handlers
             "get_latest_report" => reports::handle_get_latest_report(&self.config, args).await,

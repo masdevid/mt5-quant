@@ -3,6 +3,7 @@ use serde_json::Value;
 pub mod analytics;
 pub mod backtest;
 pub mod baseline;
+pub mod data;
 pub mod experts;
 pub mod optimization;
 pub mod reports;
@@ -51,6 +52,10 @@ pub fn get_tools_list() -> Value {
         setfiles::tool_describe_sweep(),
         setfiles::tool_list_set_files(),
         setfiles::tool_set_from_optimization(),
+        // Data Export (3 tools)
+        data::tool_export_ohlc(),
+        data::tool_export_ticks(),
+        data::tool_list_available_data(),
         // Reports (11 tools)
         reports::tool_list_reports(),
         reports::tool_search_reports(),
