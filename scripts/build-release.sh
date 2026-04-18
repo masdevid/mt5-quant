@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 VERSION=$(grep -E '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-echo "=== Building MT5-Quant v${VERSION} ==="
+echo "=== Building MCP-MT5-Quant v${VERSION} ==="
 echo ""
 
 # Clean previous builds
@@ -19,7 +19,7 @@ mkdir -p "$PROJECT_ROOT/dist"
 
 # Build current platform
 echo "Building for current platform..."
-cargo build --release
+RUSTFLAGS="-D warnings" cargo build --release
 
 # Detect platform
 UNAME=$(uname -s)
@@ -33,7 +33,7 @@ else
     PLATFORM="unknown"
 fi
 
-PACKAGE_NAME="mt5-quant-${PLATFORM}"
+PACKAGE_NAME="mcp-mt5-quant-${PLATFORM}"
 PACKAGE_DIR="$PROJECT_ROOT/dist/${PACKAGE_NAME}"
 
 echo "Packaging for ${PLATFORM}..."
@@ -59,6 +59,7 @@ echo ""
 echo "=== Build Complete ==="
 echo ""
 echo "Package: dist/${PACKAGE_NAME}.tar.gz"
+echo "Binary: mt5-quant"
 echo "Size: $(du -h "${PACKAGE_NAME}.tar.gz" | cut -f1)"
 echo ""
 echo "Contents:"
@@ -67,4 +68,5 @@ echo ""
 echo "To install:"
 echo "  tar -xzf ${PACKAGE_NAME}.tar.gz"
 echo "  cd ${PACKAGE_NAME}"
-echo "  ./mt5-quant --help"
+echo "  sudo cp mt5-quant /usr/local/bin/"
+echo "  mt5-quant --help"

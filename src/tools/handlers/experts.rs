@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
 use crate::compile::MqlCompiler;
 use crate::models::Config;
 

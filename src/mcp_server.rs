@@ -6,6 +6,7 @@ use crate::{models::Config as ModelsConfig, tools::ToolHandler, McpError, McpReq
 
 /// Auto-verify result stored after first initialization
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct AutoVerifyResult {
     all_ok: bool,
     hint: String,
@@ -89,6 +90,7 @@ impl McpServer {
     }
     
     /// Get current verify status (may be loading if called immediately after init)
+    #[allow(dead_code)]
     async fn get_verify_status(&self) -> (Option<bool>, String) {
         let guard = self.auto_verify_result.lock().await;
         match guard.as_ref() {

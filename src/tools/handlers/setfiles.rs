@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
 use crate::models::Config;
 
 pub async fn handle_read_set_file(args: &Value) -> Result<Value> {
