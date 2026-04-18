@@ -160,22 +160,47 @@ pub async fn handle_list_scripts(config: &Config, args: &Value) -> Result<Value>
 }
 
 pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
-    let expert_path = args.get("expert_path")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("expert_path is required"))?;
-    
+    use std::path::PathBuf;
+
+    let resolved_path: String = if let Some(p) = args.get("expert_path").and_then(|v| v.as_str()) {
+        p.to_string()
+    } else if let Some(name) = args.get("expert").and_then(|v| v.as_str()) {
+        let mut candidates = vec![
+            PathBuf::from(name).with_extension("mq5"),
+        ];
+        if let Some(experts_dir) = &config.experts_dir {
+            candidates.push(PathBuf::from(experts_dir).join(name).join(format!("{}.mq5", name)));
+            candidates.push(PathBuf::from(experts_dir).join(format!("{}.mq5", name)));
+        }
+        match candidates.into_iter().find(|p| p.exists()) {
+            Some(p) => p.to_string_lossy().to_string(),
+            None => return Ok(serde_json::json!({
+                "content": [{ "type": "text", "text": serde_json::json!({
+                    "success": false,
+                    "error": format!("Cannot find {}.mq5 in MT5 Experts dir or current directory", name),
+                }).to_string() }],
+                "isError": true
+            })),
+        }
+    } else {
+        return Err(anyhow::anyhow!("Either 'expert' or 'expert_path' is required"));
+    };
+
     let compiler = MqlCompiler::new(config.clone());
+    let expert_path = resolved_path.as_str();
     
-    match compiler.compile(expert_path) {
+    match compiler.compile(&expert_path) {
         Ok(result) => {
             Ok(json!({
                 "content": [{ "type": "text", "text": json!({
                     "success": result.success,
                     "binary_path": result.ex5_path.map(|p| p.to_string_lossy().to_string()),
                     "binary_size_bytes": result.binary_size,
+                    "files_synced": result.files_synced,
                     "warnings": result.warnings.len(),
                     "errors": result.errors.len(),
                     "error_list": result.errors,
+                    "warning_list": result.warnings,
                 }).to_string() }],
                 "isError": !result.success
             }))

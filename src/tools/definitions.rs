@@ -144,12 +144,12 @@ fn tool_compare_baseline() -> Value {
 fn tool_compile_ea() -> Value {
     json!({
         "name": "compile_ea",
-        "description": "Compile an MQL5 Expert Advisor via MetaEditor",
+        "description": "Compile an MQL5 Expert Advisor via MetaEditor. Provide either 'expert' (EA name, searches project and MT5 Experts dirs) or 'expert_path' (full path to .mq5 file).",
         "inputSchema": {
             "type": "object",
-            "required": ["expert_path"],
             "properties": {
-                "expert_path": { "type": "string" }
+                "expert": { "type": "string", "description": "EA name without extension (e.g. 'DPS21')" },
+                "expert_path": { "type": "string", "description": "Full path to the .mq5 source file" }
             }
         }
     })

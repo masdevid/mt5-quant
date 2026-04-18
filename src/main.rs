@@ -3,6 +3,7 @@ mod compile;
 mod models;
 mod optimization;
 mod pipeline;
+mod storage;
 mod tools;
 
 mod config;
