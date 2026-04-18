@@ -49,6 +49,14 @@ impl ToolHandler {
             
             // Analysis handlers
             "analyze_report" => analysis::handle_analyze_report(&self.config, args).await,
+            "analyze_monthly_pnl" => analysis::handle_analyze_monthly_pnl(&self.config, args).await,
+            "analyze_drawdown_events" => analysis::handle_analyze_drawdown_events(&self.config, args).await,
+            "analyze_top_losses" => analysis::handle_analyze_top_losses(&self.config, args).await,
+            "analyze_loss_sequences" => analysis::handle_analyze_loss_sequences(&self.config, args).await,
+            "analyze_position_pairs" => analysis::handle_analyze_position_pairs(&self.config, args).await,
+            "analyze_direction_bias" => analysis::handle_analyze_direction_bias(&self.config, args).await,
+            "analyze_streaks" => analysis::handle_analyze_streaks(&self.config, args).await,
+            "analyze_concurrent_peak" => analysis::handle_analyze_concurrent_peak(&self.config, args).await,
             "compare_baseline" => analysis::handle_compare_baseline(&self.config, args).await,
             
             // Set file handlers

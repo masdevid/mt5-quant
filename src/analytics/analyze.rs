@@ -34,7 +34,7 @@ impl DealAnalyzer {
         }
     }
 
-    fn monthly_pnl(&self, deals: &[Deal]) -> Vec<MonthlyPnl> {
+    pub fn monthly_pnl(&self, deals: &[Deal]) -> Vec<MonthlyPnl> {
         let mut monthly: HashMap<String, (f64, i32)> = HashMap::new();
 
         for deal in deals {
@@ -71,7 +71,7 @@ impl DealAnalyzer {
         result
     }
 
-    fn reconstruct_dd_events(&self, deals: &[Deal], _metrics: &Metrics) -> Vec<DrawdownEvent> {
+    pub fn reconstruct_dd_events(&self, deals: &[Deal], _metrics: &Metrics) -> Vec<DrawdownEvent> {
         let mut balance_curve = Vec::new();
         let mut peak_balance: f64 = 0.0;
         let mut initial_balance: Option<f64> = None;
@@ -178,7 +178,7 @@ impl DealAnalyzer {
         event
     }
 
-    fn top_losses(&self, deals: &[Deal], n: usize) -> Vec<LossEntry> {
+    pub fn top_losses(&self, deals: &[Deal], n: usize) -> Vec<LossEntry> {
         let mut losses: Vec<LossEntry> = deals
             .iter()
             .filter(|d| d.profit < 0.0)
@@ -196,7 +196,7 @@ impl DealAnalyzer {
         losses
     }
 
-    fn loss_sequences(&self, deals: &[Deal]) -> Vec<LossSequence> {
+    pub fn loss_sequences(&self, deals: &[Deal]) -> Vec<LossSequence> {
         let closed: Vec<&Deal> = deals
             .iter()
             .filter(|d| d.entry.to_lowercase().contains("out") && d.profit != 0.0)
@@ -241,7 +241,7 @@ impl DealAnalyzer {
         sequences
     }
 
-    fn position_pairs(&self, deals: &[Deal]) -> Vec<PositionPair> {
+    pub fn position_pairs(&self, deals: &[Deal]) -> Vec<PositionPair> {
         let mut open_pos: HashMap<String, &Deal> = HashMap::new();
         let mut pairs = Vec::new();
 
@@ -278,7 +278,7 @@ impl DealAnalyzer {
         pairs
     }
 
-    fn direction_bias(&self, deals: &[Deal]) -> HashMap<String, DirectionStats> {
+    pub fn direction_bias(&self, deals: &[Deal]) -> HashMap<String, DirectionStats> {
         let mut stats: HashMap<String, (i32, i32, f64)> = HashMap::new();
         stats.insert("buy".to_string(), (0, 0, 0.0));
         stats.insert("sell".to_string(), (0, 0, 0.0));
@@ -314,7 +314,7 @@ impl DealAnalyzer {
             .collect()
     }
 
-    fn streak_analysis(&self, deals: &[Deal]) -> StreakAnalysis {
+    pub fn streak_analysis(&self, deals: &[Deal]) -> StreakAnalysis {
         let closed: Vec<&Deal> = deals
             .iter()
             .filter(|d| d.entry.to_lowercase().contains("out") && d.profit != 0.0)
@@ -372,7 +372,7 @@ impl DealAnalyzer {
         }
     }
 
-    fn concurrent_peak(&self, deals: &[Deal]) -> ConcurrentPeak {
+    pub fn concurrent_peak(&self, deals: &[Deal]) -> ConcurrentPeak {
         let mut events: Vec<(DateTime<chrono::Utc>, i32, &Deal)> = Vec::new();
 
         for deal in deals {
