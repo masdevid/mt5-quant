@@ -1,6 +1,12 @@
 # MCP Tool Specification
 
-Full input/output schemas for all MT5-Quant tools.
+Full input/output schemas for MT5-Quant tools.
+
+> **Documentation Status:** This file documents 31 of 43 total tools. Missing:
+> - `list_experts`, `list_indicators`, `list_scripts`
+> - `healthcheck`
+> - `search_reports`, `get_latest_report`
+> - Granular analytics: `analyze_monthly_pnl`, `analyze_drawdown_events`, `analyze_top_losses`, `analyze_loss_sequences`, `analyze_position_pairs`, `analyze_direction_bias`, `analyze_streaks`, `analyze_concurrent_peak`
 
 ---
 
