@@ -15,6 +15,7 @@ pub fn get_tools_list() -> Value {
         tool_get_optimization_status(),
         tool_prune_reports(),
         tool_list_reports(),
+        tool_search_reports(),
         tool_tail_log(),
         tool_cache_status(),
         tool_clean_cache(),
@@ -32,6 +33,7 @@ pub fn get_tools_list() -> Value {
         tool_get_history(),
         tool_promote_to_baseline(),
         tool_annotate_history(),
+        tool_healthcheck(),
     ];
 
     json!(tools)
@@ -228,12 +230,31 @@ fn tool_prune_reports() -> Value {
 fn tool_list_reports() -> Value {
     json!({
         "name": "list_reports",
-        "description": "List all backtest report directories",
+        "description": "List most recent backtest reports from the central registry (SQLite). Returns id, metrics, set file, chart paths.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "limit": { "type": "integer" },
-                "include_opt": { "type": "boolean" }
+                "limit": { "type": "integer", "description": "Max results (default 30)" }
+            }
+        }
+    })
+}
+
+fn tool_search_reports() -> Value {
+    json!({
+        "name": "search_reports",
+        "description": "Search backtest history with filters. All filters are optional and combinable.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "expert": { "type": "string", "description": "EA name substring match" },
+                "symbol": { "type": "string", "description": "Exact symbol, e.g. XAUUSD" },
+                "timeframe": { "type": "string", "description": "Exact timeframe, e.g. M5" },
+                "after": { "type": "string", "description": "ISO8601 date — only reports created after this" },
+                "min_profit": { "type": "number", "description": "Minimum net profit" },
+                "max_dd": { "type": "number", "description": "Maximum drawdown %" },
+                "verdict": { "type": "string", "enum": ["winner", "loser", "marginal", "reference"] },
+                "limit": { "type": "integer", "description": "Max results (default 50)" }
             }
         }
     })
@@ -479,16 +500,28 @@ fn tool_promote_to_baseline() -> Value {
 fn tool_annotate_history() -> Value {
     json!({
         "name": "annotate_history",
-        "description": "Add notes/verdict/tags to a history entry",
+        "description": "Add notes, verdict, or tags to a report entry in the registry",
         "inputSchema": {
             "type": "object",
             "required": ["history_id"],
             "properties": {
-                "history_id": { "type": "string" },
+                "history_id": { "type": "string", "description": "Report id from list_reports or search_reports" },
                 "notes": { "type": "string" },
                 "tags": { "type": "array", "items": { "type": "string" } },
-                "add_tags": { "type": "array", "items": { "type": "string" } },
                 "verdict": { "type": "string", "enum": ["winner", "loser", "marginal", "reference"] }
+            }
+        }
+    })
+}
+
+fn tool_healthcheck() -> Value {
+    json!({
+        "name": "healthcheck",
+        "description": "System health check with OS detection and configuration validation",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "detailed": { "type": "boolean", "description": "Include detailed system info", "default": false }
             }
         }
     })

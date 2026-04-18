@@ -1,6 +1,6 @@
 use anyhow::Result;
+use chrono::Datelike;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use crate::analytics::DealAnalyzer;
@@ -10,6 +10,7 @@ use crate::models::deals::Deal;
 use crate::models::metrics::Metrics;
 use crate::optimization::{OptimizationParams, OptimizationParser, OptimizationRunner};
 use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
+use crate::storage::{ReportDb, ReportFilters};
 
 #[derive(Debug)]
 pub struct ToolHandler {
@@ -32,6 +33,7 @@ impl ToolHandler {
             "cache_status" => self.handle_cache_status().await,
             "clean_cache" => self.handle_clean_cache(args).await,
             "list_reports" => self.handle_list_reports(args).await,
+            "search_reports" => self.handle_search_reports(args).await,
             "prune_reports" => self.handle_prune_reports(args).await,
             "list_set_files" => self.handle_list_set_files().await,
             "describe_sweep" => self.handle_describe_sweep(args).await,
@@ -57,6 +59,7 @@ impl ToolHandler {
             "promote_to_baseline" => self.handle_promote_to_baseline(args).await,
             "get_history" => self.handle_get_history(args).await,
             "annotate_history" => self.handle_annotate_history(args).await,
+            "healthcheck" => self.handle_healthcheck(args).await,
             _ => Ok(json!({
                 "content": [{ "type": "text", "text": format!("Tool '{}' not implemented", name) }],
                 "isError": true
@@ -65,53 +68,75 @@ impl ToolHandler {
     }
 
     async fn handle_verify_setup(&self) -> Result<Value> {
-        let mut checks = HashMap::new();
+        let mut checks = serde_json::Map::new();
         let mut all_ok = true;
 
-        let config_path = Config::get_config_path();
-        checks.insert("config_file", json!({
+        let config_path = Config::writable_config_path();
+        checks.insert("config_file".into(), json!({
             "ok": config_path.exists(),
-            "detail": config_path.to_string_lossy()
+            "path": config_path.to_string_lossy()
         }));
-        if !config_path.exists() {
-            all_ok = false;
-        }
 
-        if let Some(wine) = &self.config.wine_executable {
-            let wine_ok = Path::new(wine).exists();
-            checks.insert("wine_executable", json!({ "ok": wine_ok, "detail": wine }));
-            if !wine_ok { all_ok = false; }
-        } else {
-            checks.insert("wine_executable", json!({ "ok": false, "detail": "not set" }));
-            all_ok = false;
-        }
+        let check = |v: &Option<String>, is_dir: bool| -> Value {
+            match v {
+                None => json!({ "ok": false, "detail": "not set" }),
+                Some(p) => {
+                    let ok = if is_dir { Path::new(p).is_dir() } else { Path::new(p).exists() };
+                    json!({ "ok": ok, "detail": p })
+                }
+            }
+        };
 
-        if let Some(term) = &self.config.terminal_dir {
-            let term_ok = Path::new(term).is_dir();
-            checks.insert("terminal_dir", json!({ "ok": term_ok, "detail": term }));
-            if !term_ok { all_ok = false; }
+        let wine_ok = self.config.wine_executable.as_ref()
+            .map(|p| Path::new(p).exists()).unwrap_or(false);
+        let term_ok = self.config.terminal_dir.as_ref()
+            .map(|p| Path::new(p).is_dir()).unwrap_or(false);
+        let _exp_ok  = self.config.experts_dir.as_ref()
+            .map(|p| Path::new(p).is_dir()).unwrap_or(false);
+        let _prof_ok = self.config.tester_profiles_dir.as_ref()
+            .map(|p| Path::new(p).is_dir()).unwrap_or(false);
+
+        if !wine_ok || !term_ok { all_ok = false; }
+
+        checks.insert("wine_executable".into(),    check(&self.config.wine_executable, false));
+        checks.insert("terminal_dir".into(),       check(&self.config.terminal_dir, true));
+        checks.insert("experts_dir".into(),        check(&self.config.experts_dir, true));
+        checks.insert("tester_profiles_dir".into(),check(&self.config.tester_profiles_dir, true));
+        checks.insert("display_mode".into(),       json!(self.config.display_mode));
+        checks.insert("reports_dir".into(),        json!(self.config.reports_dir().to_string_lossy().to_string()));
+        checks.insert("db_path".into(),            json!(Config::db_path().to_string_lossy().to_string()));
+
+        let hint = if all_ok {
+            "Environment fully configured and ready".into()
+        } else if !config_path.exists() {
+            format!("Auto-discovery will run on next request. Config will be written to {}", config_path.display())
         } else {
-            checks.insert("terminal_dir", json!({ "ok": false, "detail": "not set" }));
-            all_ok = false;
-        }
+            format!("Fix missing paths in {}", config_path.display())
+        };
 
         Ok(json!({
             "content": [{ "type": "text", "text": json!({
                 "all_ok": all_ok,
+                "config_path": config_path.to_string_lossy(),
                 "checks": checks,
-                "hint": if all_ok { "Environment looks good" } else { "Run: bash scripts/setup.sh" }
+                "hint": hint,
             }).to_string() }],
             "isError": false
         }))
     }
 
     async fn handle_list_symbols(&self) -> Result<Value> {
-        let symbols = vec!["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD"];
+        let symbols = self.config.discover_symbols();
         Ok(json!({
             "content": [{ "type": "text", "text": json!({
                 "success": true,
-                "active_server": "Demo",
-                "symbols": symbols
+                "count": symbols.len(),
+                "symbols": symbols,
+                "hint": if symbols.is_empty() {
+                    "No history data found. Open MT5 and download tick data for the symbols you want to backtest."
+                } else {
+                    "These symbols have local tick history and can be used for backtesting."
+                }
             }).to_string() }],
             "isError": false
         }))
@@ -158,17 +183,50 @@ impl ToolHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
-        let symbol = args.get("symbol")
+        // ── Symbol pre-flight ────────────────────────────────────────────────
+        let requested_symbol = args.get("symbol")
             .and_then(|v| v.as_str())
-            .unwrap_or("XAUUSD");
+            .unwrap_or("");
 
-        let from_date = args.get("from_date")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("from_date is required"))?;
+        let available = self.config.discover_symbols();
 
-        let to_date = args.get("to_date")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("to_date is required"))?;
+        let symbol = if requested_symbol.is_empty() {
+            // Use config default, fallback to first available
+            let default = self.config.backtest_symbol.clone()
+                .unwrap_or_else(|| "XAUUSD".to_string());
+            if available.contains(&default) {
+                default
+            } else if let Some(first) = available.first() {
+                tracing::warn!("Default symbol {} not found; using {}", default, first);
+                first.clone()
+            } else {
+                default
+            }
+        } else {
+            // Validate requested symbol
+            if !available.is_empty() && !available.contains(&requested_symbol.to_string()) {
+                return Ok(json!({
+                    "content": [{ "type": "text", "text": json!({
+                        "error": format!("Symbol '{}' has no local history data.", requested_symbol),
+                        "available_symbols": available,
+                        "hint": "Use list_symbols to see all available symbols."
+                    }).to_string() }],
+                    "isError": true
+                }));
+            }
+            requested_symbol.to_string()
+        };
+
+        // ── Date defaulting: past complete calendar month ────────────────────
+        let (from_date, to_date) = {
+            let f = args.get("from_date").and_then(|v| v.as_str()).unwrap_or("");
+            let t = args.get("to_date").and_then(|v| v.as_str()).unwrap_or("");
+            if f.is_empty() || t.is_empty() {
+                past_complete_month()
+            } else {
+                (f.to_string(), t.to_string())
+            }
+        };
 
         let params = BacktestParams {
             expert: expert.to_string(),
@@ -339,73 +397,130 @@ impl ToolHandler {
 
     async fn handle_list_reports(&self, args: &Value) -> Result<Value> {
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
-        
-        let reports_dir = self.config.reports_dir();
-        let mut reports = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&reports_dir) {
-            let mut entries: Vec<_> = entries.flatten().collect();
-            entries.sort_by(|a, b| {
-                b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH)
-                    .cmp(&a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH))
-            });
-
-            for entry in entries.into_iter().take(limit) {
-                let path = entry.path();
-                if path.is_dir() {
-                    let name = path.file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    
-                    let metrics_file = path.join("metrics.json");
-                    let mut profit = 0.0;
-                    let mut dd = 0.0;
-                    let mut trades = 0;
-
-                    if let Ok(content) = fs::read_to_string(&metrics_file) {
-                        if let Ok(metrics) = serde_json::from_str::<Value>(&content) {
-                            profit = metrics.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                            dd = metrics.get("max_dd_pct").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                            trades = metrics.get("total_trades").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                        }
-                    }
-
-                    reports.push(json!({
-                        "name": name,
-                        "profit": profit,
-                        "max_dd_pct": dd,
-                        "trades": trades
-                    }));
-                }
-            }
+        let db = ReportDb::new(&Config::db_path());
+        if let Err(e) = db.init() {
+            return Ok(json!({
+                "content": [{ "type": "text", "text": format!("DB error: {}", e) }],
+                "isError": true
+            }));
         }
 
+        let filters = ReportFilters::default();
+        let entries = db.list(limit, &filters)?;
+        let total = db.count().unwrap_or(0);
+
+        let reports: Vec<Value> = entries
+            .iter()
+            .map(|e| json!({
+                "id": e.id,
+                "expert": e.expert,
+                "symbol": e.symbol,
+                "timeframe": e.timeframe,
+                "from_date": e.from_date,
+                "to_date": e.to_date,
+                "created_at": e.created_at,
+                "net_profit": e.net_profit,
+                "profit_factor": e.profit_factor,
+                "max_dd_pct": e.max_dd_pct,
+                "total_trades": e.total_trades,
+                "win_rate_pct": e.win_rate_pct,
+                "set_file": e.set_file_original,
+                "charts_dir": e.charts_dir,
+                "report_dir": e.report_dir,
+                "verdict": e.verdict,
+                "tags": e.tags,
+                "notes": e.notes,
+            }))
+            .collect();
+
         Ok(json!({
-            "content": [{ "type": "text", "text": json!({ "reports": reports }).to_string() }],
+            "content": [{ "type": "text", "text": json!({
+                "total": total,
+                "returned": reports.len(),
+                "reports": reports,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_search_reports(&self, args: &Value) -> Result<Value> {
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+        let db = ReportDb::new(&Config::db_path());
+        db.init()?;
+
+        let filters = ReportFilters {
+            expert: args.get("expert").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            symbol: args.get("symbol").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            timeframe: args.get("timeframe").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            created_after: args.get("after").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            min_profit: args.get("min_profit").and_then(|v| v.as_f64()),
+            max_dd: args.get("max_dd").and_then(|v| v.as_f64()),
+            verdict: args.get("verdict").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        };
+
+        let entries = db.list(limit, &filters)?;
+
+        let reports: Vec<Value> = entries
+            .iter()
+            .map(|e| json!({
+                "id": e.id,
+                "expert": e.expert,
+                "symbol": e.symbol,
+                "timeframe": e.timeframe,
+                "from_date": e.from_date,
+                "to_date": e.to_date,
+                "created_at": e.created_at,
+                "net_profit": e.net_profit,
+                "profit_factor": e.profit_factor,
+                "max_dd_pct": e.max_dd_pct,
+                "total_trades": e.total_trades,
+                "win_rate_pct": e.win_rate_pct,
+                "set_file": e.set_file_original,
+                "set_snapshot": e.set_snapshot_path,
+                "charts_dir": e.charts_dir,
+                "report_dir": e.report_dir,
+                "verdict": e.verdict,
+                "tags": e.tags,
+                "notes": e.notes,
+            }))
+            .collect();
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "matched": reports.len(),
+                "reports": reports,
+            }).to_string() }],
             "isError": false
         }))
     }
 
     async fn handle_prune_reports(&self, args: &Value) -> Result<Value> {
         let keep_last = args.get("keep_last").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-        
-        let reports_dir = self.config.reports_dir();
+        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let db = ReportDb::new(&Config::db_path());
+        db.init()?;
+
+        let purgeable = db.list_purgeable(keep_last)?;
         let mut pruned = 0;
+        let mut freed_bytes: u64 = 0;
 
-        if let Ok(entries) = fs::read_dir(&reports_dir) {
-            let mut entries: Vec<_> = entries.flatten().collect();
-            entries.sort_by(|a, b| {
-                b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH)
-                    .cmp(&a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH))
-            });
+        for (id, report_dir, charts_dir) in &purgeable {
+            if !dry_run {
+                // Delete report data directory
+                freed_bytes += dir_size(std::path::Path::new(report_dir));
+                let _ = fs::remove_dir_all(report_dir);
 
-            for entry in entries.into_iter().skip(keep_last) {
-                let path = entry.path();
-                if path.is_dir() && !path.to_string_lossy().ends_with("_opt") {
-                    let _ = fs::remove_dir_all(&path);
-                    pruned += 1;
+                // Charts are in OS temp — remove if present
+                if let Some(cd) = charts_dir {
+                    freed_bytes += dir_size(std::path::Path::new(cd));
+                    let _ = fs::remove_dir_all(cd);
                 }
+
+                let _ = db.delete_entry(id);
+                pruned += 1;
             }
         }
 
@@ -413,7 +528,10 @@ impl ToolHandler {
             "content": [{ "type": "text", "text": json!({
                 "success": true,
                 "pruned": pruned,
-                "kept": keep_last
+                "would_prune": purgeable.len(),
+                "kept": keep_last,
+                "freed_bytes": freed_bytes,
+                "dry_run": dry_run,
             }).to_string() }],
             "isError": false
         }))
@@ -1056,39 +1174,48 @@ impl ToolHandler {
     }
 
     async fn handle_get_history(&self, args: &Value) -> Result<Value> {
-        let _limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-        let history_dir = std::path::Path::new(".mt5mcp_history");
-        let mut history = Vec::new();
+        let db = ReportDb::new(&Config::db_path());
+        db.init()?;
 
-        if history_dir.exists() {
-            for entry in fs::read_dir(history_dir)? {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "tar.gz").unwrap_or(false) {
-                        let name = path.file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        
-                        let metadata = entry.metadata()?;
-                        let modified = metadata.modified()?;
-                        let size = metadata.len();
+        let filters = ReportFilters {
+            expert: args.get("ea").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            symbol: args.get("symbol").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            verdict: args.get("verdict").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            ..Default::default()
+        };
 
-                        history.push(json!({
-                            "name": name,
-                            "path": path.to_string_lossy(),
-                            "size": size,
-                            "archived_at": modified.elapsed().map(|e| e.as_secs()).unwrap_or(0),
-                        }));
-                    }
-                }
-            }
-        }
+        let entries = db.list(limit, &filters)?;
+        let total = db.count().unwrap_or(0);
+
+        let history: Vec<Value> = entries
+            .iter()
+            .map(|e| json!({
+                "id": e.id,
+                "expert": e.expert,
+                "symbol": e.symbol,
+                "timeframe": e.timeframe,
+                "from_date": e.from_date,
+                "to_date": e.to_date,
+                "created_at": e.created_at,
+                "net_profit": e.net_profit,
+                "profit_factor": e.profit_factor,
+                "max_dd_pct": e.max_dd_pct,
+                "total_trades": e.total_trades,
+                "set_file": e.set_file_original,
+                "set_snapshot": e.set_snapshot_path,
+                "charts_dir": e.charts_dir,
+                "verdict": e.verdict,
+                "tags": e.tags,
+                "notes": e.notes,
+            }))
+            .collect();
 
         Ok(json!({
             "content": [{ "type": "text", "text": json!({
-                "total_archived": history.len(),
+                "total": total,
+                "returned": history.len(),
                 "history": history,
             }).to_string() }],
             "isError": false
@@ -1096,32 +1223,246 @@ impl ToolHandler {
     }
 
     async fn handle_annotate_history(&self, args: &Value) -> Result<Value> {
-        let report_name = args.get("report_name")
+        let report_id = args
+            .get("history_id")
+            .or_else(|| args.get("report_name"))
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("report_name is required"))?;
+            .ok_or_else(|| anyhow::anyhow!("history_id is required"))?;
 
-        let note = args.get("note")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let notes = args.get("notes").and_then(|v| v.as_str());
+        let verdict = args.get("verdict").and_then(|v| v.as_str());
+        let tags: Option<Vec<String>> = args
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
 
-        let notes_path = std::path::Path::new(".mt5mcp_history").join("notes.json");
-        
-        let mut notes: serde_json::Map<String, Value> = if notes_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&notes_path)?)?
-        } else {
-            serde_json::Map::new()
-        };
+        let db = ReportDb::new(&Config::db_path());
+        db.init()?;
 
-        notes.insert(report_name.to_string(), json!(note));
-        fs::write(&notes_path, serde_json::to_string_pretty(&notes)?)?;
+        let updated = db.annotate(report_id, notes, tags, verdict)?;
 
         Ok(json!({
             "content": [{ "type": "text", "text": json!({
-                "success": true,
-                "report": report_name,
-                "note": note,
+                "success": updated,
+                "id": report_id,
+                "notes": notes,
+                "verdict": verdict,
             }).to_string() }],
             "isError": false
         }))
     }
+
+    async fn handle_healthcheck(&self, args: &Value) -> Result<Value> {
+        let detailed = args.get("detailed").and_then(|v| v.as_bool()).unwrap_or(false);
+        
+        // OS Detection
+        let os_info = Self::detect_os();
+        
+        // Configuration validation
+        let config_status = self.validate_configuration().await;
+        
+        // Build health status
+        let mut healthy = true;
+        let mut issues = Vec::new();
+        
+        if !config_status.config_exists {
+            healthy = false;
+            issues.push("Configuration file not found - run setup to configure");
+        }
+        if !config_status.wine_found {
+            healthy = false;
+            issues.push("Wine/CrossOver not found - required for MT5 execution");
+        }
+        if !config_status.mt5_dir_found {
+            healthy = false;
+            issues.push("MT5 directory not found - check installation");
+        }
+        
+        let mut response = json!({
+            "success": true,
+            "healthy": healthy,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "os": {
+                "platform": os_info.platform,
+                "arch": os_info.arch,
+                "name": os_info.name,
+                "is_macos": os_info.is_macos,
+                "is_linux": os_info.is_linux,
+            },
+            "configuration": {
+                "config_exists": config_status.config_exists,
+                "config_path": config_status.config_path,
+                "wine_found": config_status.wine_found,
+                "wine_path": config_status.wine_path,
+                "mt5_dir_found": config_status.mt5_dir_found,
+                "mt5_dir": config_status.mt5_dir,
+                "experts_dir_found": config_status.experts_dir_found,
+                "tester_profiles_found": config_status.tester_profiles_found,
+            },
+            "issues": issues,
+        });
+        
+        // Add detailed info if requested
+        if detailed {
+            response["detailed"] = json!({
+                "rust_version": Self::get_rust_version(),
+                "exe_path": std::env::current_exe()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "unknown".to_string()),
+                "working_dir": std::env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "unknown".to_string()),
+                "env_vars": {
+                    "DISPLAY": std::env::var("DISPLAY").ok(),
+                    "WINEPREFIX": std::env::var("WINEPREFIX").ok(),
+                    "HOME": std::env::var("HOME").ok(),
+                },
+            });
+        }
+        
+        Ok(json!({
+            "content": [{ 
+                "type": "text", 
+                "text": response.to_string()
+            }],
+            "isError": false
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct OsInfo {
+    platform: String,
+    arch: String,
+    name: String,
+    is_macos: bool,
+    is_linux: bool,
+}
+
+#[derive(Debug)]
+struct ConfigStatus {
+    config_exists: bool,
+    config_path: String,
+    wine_found: bool,
+    wine_path: Option<String>,
+    mt5_dir_found: bool,
+    mt5_dir: Option<String>,
+    experts_dir_found: bool,
+    tester_profiles_found: bool,
+}
+
+impl ToolHandler {
+    fn detect_os() -> OsInfo {
+        let platform = std::env::consts::OS.to_string();
+        let arch = std::env::consts::ARCH.to_string();
+        
+        let is_macos = platform == "macos";
+        let is_linux = platform == "linux";
+        
+        let name = if is_macos {
+            Self::get_macos_version().unwrap_or_else(|| "macOS".to_string())
+        } else if is_linux {
+            Self::get_linux_distro().unwrap_or_else(|| "Linux".to_string())
+        } else {
+            platform.clone()
+        };
+        
+        OsInfo {
+            platform,
+            arch,
+            name,
+            is_macos,
+            is_linux,
+        }
+    }
+    
+    fn get_macos_version() -> Option<String> {
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| format!("macOS {}", s.trim()))
+    }
+    
+    fn get_linux_distro() -> Option<String> {
+        std::fs::read_to_string("/etc/os-release")
+            .ok()
+            .and_then(|content| {
+                content.lines()
+                    .find(|l| l.starts_with("PRETTY_NAME="))
+                    .map(|l| l.replace("PRETTY_NAME=", "").trim_matches('"').to_string())
+            })
+    }
+    
+    fn get_rust_version() -> Option<String> {
+        std::process::Command::new("rustc")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+    }
+    
+    async fn validate_configuration(&self) -> ConfigStatus {
+        let config_path = Config::writable_config_path();
+        let config_exists = config_path.exists();
+        
+        let wine_found = self.config.wine_executable.as_ref()
+            .map(|p| Path::new(p).exists())
+            .unwrap_or(false);
+        let wine_path = self.config.wine_executable.clone();
+        
+        let mt5_dir_found = self.config.terminal_dir.as_ref()
+            .map(|p| Path::new(p).is_dir())
+            .unwrap_or(false);
+        let mt5_dir = self.config.terminal_dir.clone();
+        
+        let experts_dir_found = self.config.experts_dir.as_ref()
+            .map(|p| Path::new(p).is_dir())
+            .unwrap_or(false);
+        
+        let tester_profiles_found = self.config.tester_profiles_dir.as_ref()
+            .map(|p| Path::new(p).is_dir())
+            .unwrap_or(false);
+        
+        ConfigStatus {
+            config_exists,
+            config_path: config_path.to_string_lossy().to_string(),
+            wine_found,
+            wine_path,
+            mt5_dir_found,
+            mt5_dir,
+            experts_dir_found,
+            tester_profiles_found,
+        }
+    }
+}
+
+/// Returns (from_date, to_date) for the last fully-elapsed calendar month in MT5 format (YYYY.MM.DD).
+fn past_complete_month() -> (String, String) {
+    let now = chrono::Utc::now();
+    let first_of_this_month = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+        .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+    let last_of_prev = first_of_this_month.pred_opt()
+        .unwrap_or(first_of_this_month);
+    let first_of_prev = chrono::NaiveDate::from_ymd_opt(last_of_prev.year(), last_of_prev.month(), 1)
+        .unwrap_or(last_of_prev);
+    (
+        first_of_prev.format("%Y.%m.%d").to_string(),
+        last_of_prev.format("%Y.%m.%d").to_string(),
+    )
+}
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
 }
