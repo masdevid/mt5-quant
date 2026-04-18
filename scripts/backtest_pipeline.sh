@@ -23,7 +23,9 @@
 #   --strategy NAME      Analysis strategy profile: grid (default) | scalper | trend | hedge | generic
 #   --timeout N          Backtest timeout in seconds (default: 900)
 #   --shutdown           Close MT5 after backtest (default: keep open). Use for CI/headless.
-#   --kill-existing      Kill a running MT5 instance before launching (default: pass config to it)
+#   --kill-existing      Kill running MT5 before launching. Required when MT5 is open.
+#                        With default mode (no --shutdown): MT5 restarts, runs backtest,
+#                        then stays open so you can inspect results in the GUI.
 
 set -euo pipefail
 
@@ -374,17 +376,30 @@ BATEOF
         MT5_REPORT=$(find "${MT5_DIR}" -maxdepth 3 -name "*.htm" -newer "${INI_HOST_PATH}" 2>/dev/null | head -1)
 else
     # ── Background mode (default) ──────────────────────────────────────────────
-    # MT5 is a single-instance Windows app: if already running, launching a
-    # second instance passes the /config: args to the existing window and exits.
-    # This triggers the Strategy Tester in the running MT5 without closing it.
-    # If MT5 is not running, it starts fresh. Either way, ShutdownTerminal=0
-    # keeps it alive; we detect completion by watching for the report file.
+    # MT5 uses a single-instance lock per Wine prefix. On Wine/CrossOver, a second
+    # terminal64.exe instance exits immediately without forwarding the config to
+    # the running instance (unlike native Windows behaviour).
+    # When MT5 is running, we must kill it first — but with ShutdownTerminal=0
+    # the new instance stays open after the backtest, so the user can inspect
+    # results in the GUI without a permanent disruption.
     if $MT5_WAS_RUNNING; then
-        echo "  MT5 is running — passing config to existing instance..."
-    else
-        echo "  Launching MT5 in background (ShutdownTerminal=0)..."
+        echo "" >&2
+        echo "  ERROR: MetaTrader 5 is already running." >&2
+        echo "" >&2
+        echo "  On Wine/CrossOver a second MT5 instance cannot pass a backtest config" >&2
+        echo "  to the running terminal — it exits immediately with no report." >&2
+        echo "" >&2
+        echo "  Recommended fix:" >&2
+        echo "    Add --kill-existing to your command." >&2
+        echo "    MT5 will restart, run the backtest, then stay open (ShutdownTerminal=0)" >&2
+        echo "    so you can inspect the Strategy Tester results in the GUI." >&2
+        echo "" >&2
+        echo "  Alternative: close MT5 manually and re-run the backtest." >&2
+        exit 1
     fi
-    # `start` (no /wait): cmd.exe launches terminal64.exe and returns immediately.
+
+    echo "  Launching MT5 in background (ShutdownTerminal=0) ..."
+    # `start` (no /wait): cmd.exe launches terminal64.exe and exits immediately.
     cat > "$BAT_PATH" << 'BATEOF'
 @echo off
 cd /d "C:\Program Files\MetaTrader 5"
@@ -393,7 +408,6 @@ BATEOF
     nohup ${MT5_ARCH} "${MT5_WINE}" cmd.exe /c 'C:\_mt5mcp_run.bat' &>/dev/null &
     LAUNCHER_PID=$!
     disown "$LAUNCHER_PID" 2>/dev/null || true
-    # Give the launcher time to start terminal64.exe and exit
     sleep 5
     rm -f "$BAT_PATH"
 

@@ -128,20 +128,47 @@ def _validate_environment() -> dict | None:
 
 
 def _check_symbol(symbol: str) -> tuple[str | None, list[str]]:
-    """Check if symbol exists in MT5 history dir. Returns (warning, suggestions)."""
+    """Check symbol against active server's history. Returns (warning, suggestions)."""
     terminal_dir = cfg('terminal_dir')
     if not terminal_dir:
         return None, []
-    history_dir = Path(terminal_dir) / 'history'
-    if not history_dir.is_dir():
+
+    ini = _read_terminal_ini()
+    active_server = ini.get('LastScanServer', '')
+    bases_dir = Path(terminal_dir) / 'Bases'
+
+    # Try active server first, then fall back to scanning all servers
+    history_dir = None
+    if active_server and (bases_dir / active_server / 'history').is_dir():
+        history_dir = bases_dir / active_server / 'history'
+    elif bases_dir.is_dir():
+        for srv in bases_dir.iterdir():
+            if (srv / 'history').is_dir():
+                history_dir = srv / 'history'
+                break
+
+    if not history_dir:
         return None, []
+
     known = [d.name for d in history_dir.iterdir() if d.is_dir()]
     if not known or symbol in known:
         return None, []
-    suggestions = difflib.get_close_matches(symbol, known, n=3, cutoff=0.6)
-    sample = ', '.join(known[:5]) + ('...' if len(known) > 5 else '')
-    warning = f"Symbol '{symbol}' not found in MT5 history. Available: {sample}"
-    return warning, suggestions
+
+    suggestions = difflib.get_close_matches(symbol, known, n=3, cutoff=0.5)
+
+    # Check if symbol exists in any other server
+    other_servers = []
+    if bases_dir.is_dir():
+        for srv in bases_dir.iterdir():
+            if srv.name == active_server:
+                continue
+            if (srv / 'history' / symbol).is_dir():
+                other_servers.append(srv.name)
+
+    msg = f"Symbol '{symbol}' not found in active server '{active_server}'. Available: {', '.join(known[:6])}{'...' if len(known) > 6 else ''}"
+    if other_servers:
+        msg += f". Found in: {', '.join(other_servers)}"
+    return msg, suggestions
 
 
 # ── History helpers ───────────────────────────────────────────────────────────
@@ -340,7 +367,7 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "kill_existing": {
                         "type": "boolean",
-                        "description": "Kill a running MT5 instance before launching. Default: false — passes config to the running instance (MT5 single-instance passthrough). Set true if passthrough does not work on your Wine setup."
+                        "description": "Kill a running MT5 instance before launching. REQUIRED when MT5 is already open — Wine does not support single-instance config passthrough. With shutdown=false (default), MT5 restarts, runs the backtest, then stays open so results are visible in the GUI."
                     },
                 },
             },
@@ -467,6 +494,41 @@ async def list_tools() -> list[types.Tool]:
                 "Run this first if other tools return SETUP_REQUIRED errors."
             ),
             inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="list_symbols",
+            description=(
+                "Detect the active MT5 broker session and list symbols that have local "
+                "tick history available for backtesting. Also shows all broker servers "
+                "found in the MT5 installation. Use this before run_backtest to confirm "
+                "the correct symbol name for the connected broker."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "Filter to a specific server name. If omitted, shows active server and all servers.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="list_experts",
+            description=(
+                "List all compiled Expert Advisors (.ex5 files) found in the MT5 Experts "
+                "directory, including those inside sub-folders. Returns the expert name to "
+                "use in run_backtest and the sub-folder path if applicable."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Optional substring filter on EA name (case-insensitive).",
+                    },
+                },
+            },
         ),
         types.Tool(
             name="get_backtest_status",
@@ -1002,6 +1064,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             result = await handle_compare_baseline(arguments)
         elif name == "compile_ea":
             result = await handle_compile_ea(arguments)
+        elif name == "list_symbols":
+            result = await handle_list_symbols(arguments)
+        elif name == "list_experts":
+            result = await handle_list_experts(arguments)
         elif name == "verify_setup":
             result = await handle_verify_setup(arguments)
         elif name == "get_backtest_status":
@@ -1333,6 +1399,114 @@ async def handle_compile_ea(args: dict) -> dict:
         'success': success,
         'output': output,
         'expert_path': expert_path,
+    }
+
+
+def _read_terminal_ini() -> dict:
+    """Parse terminal.ini (UTF-16LE or UTF-8) into a flat key→value dict."""
+    terminal_dir = cfg('terminal_dir')
+    if not terminal_dir:
+        return {}
+    ini_path = Path(terminal_dir) / 'config' / 'terminal.ini'
+    if not ini_path.exists():
+        return {}
+    try:
+        raw = ini_path.read_bytes()
+        text = raw.decode('utf-16') if raw[:2] in (b'\xff\xfe', b'\xfe\xff') else raw.decode('utf-8', errors='replace')
+    except Exception:
+        return {}
+    result: dict = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if '=' in line and not line.startswith(';') and not line.startswith('['):
+            k, _, v = line.partition('=')
+            result[k.strip()] = v.strip()
+    return result
+
+
+async def handle_list_symbols(args: dict) -> dict:
+    env_error = _validate_environment()
+    if env_error:
+        return env_error
+
+    terminal_dir = cfg('terminal_dir')
+    bases_dir = Path(terminal_dir) / 'Bases'
+
+    if not bases_dir.is_dir():
+        return {'success': False, 'error': f'Bases directory not found: {bases_dir}'}
+
+    # Detect active server from terminal.ini
+    ini = _read_terminal_ini()
+    active_server = ini.get('LastScanServer', '')
+    opt_mode = ini.get('OptMode', '0')
+
+    # Collect all servers and their symbols
+    filter_server = args.get('server', '').lower()
+    servers: list[dict] = []
+    for server_dir in sorted(bases_dir.iterdir()):
+        if not server_dir.is_dir():
+            continue
+        name = server_dir.name
+        if filter_server and filter_server not in name.lower():
+            continue
+        history_dir = server_dir / 'history'
+        symbols = sorted(d.name for d in history_dir.iterdir() if d.is_dir()) if history_dir.is_dir() else []
+        servers.append({
+            'server': name,
+            'active': name == active_server,
+            'symbol_count': len(symbols),
+            'symbols': symbols,
+        })
+
+    # Put active server first
+    servers.sort(key=lambda s: (0 if s['active'] else 1, s['server']))
+
+    warnings = []
+    if opt_mode == '-1':
+        warnings.append('OptMode=-1 detected in terminal.ini — the CLEAN stage will reset this before backtest.')
+
+    return {
+        'success': True,
+        'active_server': active_server or '(unknown — open MT5 to connect)',
+        'servers': servers,
+        'warnings': warnings,
+        'hint': 'Use the symbol name exactly as shown (e.g. "XAUUSD.cent" not "XAUUSD") in run_backtest.',
+    }
+
+
+async def handle_list_experts(args: dict) -> dict:
+    env_error = _validate_environment()
+    if env_error:
+        return env_error
+
+    terminal_dir = cfg('terminal_dir')
+    experts_root = Path(cfg('experts_dir') or os.path.join(terminal_dir, 'MQL5', 'Experts'))
+
+    if not experts_root.is_dir():
+        return {'success': False, 'error': f'Experts directory not found: {experts_root}'}
+
+    name_filter = args.get('filter', '').lower()
+    experts: list[dict] = []
+
+    for ex5 in sorted(experts_root.rglob('*.ex5')):
+        rel = ex5.relative_to(experts_root)
+        expert_name = ex5.stem          # filename without .ex5
+        subfolder = str(rel.parent) if rel.parent != Path('.') else ''
+        if name_filter and name_filter not in expert_name.lower():
+            continue
+        experts.append({
+            'name': expert_name,
+            'subfolder': subfolder,
+            'run_backtest_expert': f'{subfolder}/{expert_name}' if subfolder else expert_name,
+            'path': str(ex5),
+        })
+
+    return {
+        'success': True,
+        'count': len(experts),
+        'experts_root': str(experts_root),
+        'experts': experts,
+        'hint': 'Use the "run_backtest_expert" value as the expert parameter in run_backtest.',
     }
 
 
