@@ -23,8 +23,10 @@ try:
     import mcp.server.stdio
     import mcp.types as types
     from mcp.server import Server
-except ImportError:
-    print("ERROR: mcp package not installed. Run: pip install mcp", file=sys.stderr)
+except ImportError as e:
+    print(f"ERROR: Failed to import MCP package: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 
 # Config/ROOT_DIR resolution (priority order):
