@@ -1,6 +1,7 @@
 mod analytics;
 mod compile;
 mod models;
+mod optimization;
 mod pipeline;
 mod tools;
 

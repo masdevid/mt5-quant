@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub report_dir: PathBuf,
@@ -40,6 +41,7 @@ pub struct FilePaths {
     pub deals_json: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestStatus {
     pub stage: PipelineStage,
@@ -48,6 +50,7 @@ pub struct BacktestStatus {
     pub message: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum PipelineStage {

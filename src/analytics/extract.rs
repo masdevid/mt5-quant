@@ -277,8 +277,11 @@ impl ReportExtractor {
 pub struct ExtractionResult {
     pub metrics: Metrics,
     pub deals: Vec<Deal>,
+    #[allow(dead_code)]
     pub metrics_path: PathBuf,
+    #[allow(dead_code)]
     pub deals_csv_path: PathBuf,
+    #[allow(dead_code)]
     pub deals_json_path: PathBuf,
 }
 

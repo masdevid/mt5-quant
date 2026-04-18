@@ -20,6 +20,7 @@ pub struct Deal {
     pub magic: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DealType {
@@ -69,6 +70,7 @@ pub struct LossSequence {
     pub end: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CycleStats {
     pub total_cycles: i32,
@@ -77,6 +79,7 @@ pub struct CycleStats {
     pub win_rate_by_depth: HashMap<String, WinRateByDepth>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WinRateByDepth {
     pub total: i32,

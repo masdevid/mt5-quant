@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -392,7 +392,7 @@ impl DealAnalyzer {
         let mut peak = 0;
         let mut peak_time = String::new();
 
-        for (dt, delta, deal) in events {
+        for (_dt, delta, deal) in events {
             count = (count + delta).max(0);
             if count > peak {
                 peak = count;

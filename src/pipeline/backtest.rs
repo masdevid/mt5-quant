@@ -30,6 +30,7 @@ pub struct BacktestParams {
     pub skip_compile: bool,
     pub skip_clean: bool,
     pub skip_analyze: bool,
+    #[allow(dead_code)]
     pub deep_analyze: bool,
     pub shutdown: bool,
     pub kill_existing: bool,
@@ -250,7 +251,7 @@ start terminal64.exe /config:"C:\Program Files\MetaTrader 5\backtest_config.ini"
         let bat_path = wine_prefix.join("drive_c").join("_mt5mcp_run.bat");
         fs::write(&bat_path, bat_content)?;
 
-        let cmd = format!("cmd.exe /c 'C:\\_mt5mcp_run.bat'");
+        let _cmd = format!("cmd.exe /c 'C:\\_mt5mcp_run.bat'");
 
         if params.shutdown {
             let output = Command::new("timeout")
@@ -346,7 +347,7 @@ start terminal64.exe /config:"C:\Program Files\MetaTrader 5\backtest_config.ini"
     }
 
     async fn kill_mt5(&self) -> Result<()> {
-        let output = Command::new("pkill")
+        let _output = Command::new("pkill")
             .args(&["-TERM", "-f", "terminal64\\.exe"])
             .output()?;
 

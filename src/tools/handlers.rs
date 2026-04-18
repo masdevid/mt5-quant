@@ -3,8 +3,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use crate::analytics::DealAnalyzer;
 use crate::compile::MqlCompiler;
 use crate::models::Config;
+use crate::models::deals::Deal;
+use crate::models::metrics::Metrics;
+use crate::optimization::{OptimizationParams, OptimizationParser, OptimizationRunner};
 use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 
 #[derive(Debug)]
@@ -31,6 +35,28 @@ impl ToolHandler {
             "prune_reports" => self.handle_prune_reports(args).await,
             "list_set_files" => self.handle_list_set_files().await,
             "describe_sweep" => self.handle_describe_sweep(args).await,
+            // Optimization tools
+            "run_optimization" => self.handle_run_optimization(args).await,
+            "get_optimization_status" => self.handle_get_optimization_status(args).await,
+            "get_optimization_results" => self.handle_get_optimization_results(args).await,
+            "list_jobs" => self.handle_list_jobs().await,
+            // Analysis tools
+            "analyze_report" => self.handle_analyze_report(args).await,
+            "compare_baseline" => self.handle_compare_baseline(args).await,
+            // Set file tools
+            "read_set_file" => self.handle_read_set_file(args).await,
+            "write_set_file" => self.handle_write_set_file(args).await,
+            "patch_set_file" => self.handle_patch_set_file(args).await,
+            "clone_set_file" => self.handle_clone_set_file(args).await,
+            "diff_set_files" => self.handle_diff_set_files(args).await,
+            "set_from_optimization" => self.handle_set_from_optimization(args).await,
+            // Utility tools
+            "tail_log" => self.handle_tail_log(args).await,
+            "archive_report" => self.handle_archive_report(args).await,
+            "archive_all_reports" => self.handle_archive_all_reports(args).await,
+            "promote_to_baseline" => self.handle_promote_to_baseline(args).await,
+            "get_history" => self.handle_get_history(args).await,
+            "annotate_history" => self.handle_annotate_history(args).await,
             _ => Ok(json!({
                 "content": [{ "type": "text", "text": format!("Tool '{}' not implemented", name) }],
                 "isError": true
@@ -457,6 +483,643 @@ impl ToolHandler {
                 "success": true,
                 "path": path,
                 "sweep_params": sweep_params
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    // Optimization handlers
+    async fn handle_run_optimization(&self, args: &Value) -> Result<Value> {
+        let expert = args.get("expert")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
+
+        let set_file = args.get("set_file")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("set_file is required"))?;
+
+        let from_date = args.get("from_date")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("from_date is required"))?;
+
+        let to_date = args.get("to_date")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("to_date is required"))?;
+
+        let params = OptimizationParams {
+            expert: expert.to_string(),
+            set_file: set_file.to_string(),
+            symbol: args.get("symbol").and_then(|v| v.as_str()).unwrap_or("XAUUSD").to_string(),
+            from_date: from_date.to_string(),
+            to_date: to_date.to_string(),
+            deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
+            model: 0, // Always 0 for optimization
+            leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
+            currency: args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD").to_string(),
+        };
+
+        let runner = OptimizationRunner::new(self.config.clone());
+        let result = runner.run(params).await?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": result.success,
+                "job_id": result.job_id,
+                "pid": result.pid,
+                "log_file": result.log_file.to_string_lossy(),
+                "combinations": result.combinations,
+                "message": result.message,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_get_optimization_status(&self, args: &Value) -> Result<Value> {
+        let job_id = args.get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("job_id is required"))?;
+
+        let runner = OptimizationRunner::new(self.config.clone());
+        let status = runner.get_job_status(job_id)?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": status.to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_get_optimization_results(&self, args: &Value) -> Result<Value> {
+        let job_id = args.get("job_id")
+            .and_then(|v| v.as_str());
+
+        let file = args.get("file")
+            .and_then(|v| v.as_str());
+
+        let parser = OptimizationParser::new();
+        
+        let passes = if let Some(jid) = job_id {
+            parser.parse_job(jid)?
+        } else if let Some(f) = file {
+            parser.parse_file(std::path::Path::new(f))?
+        } else {
+            return Err(anyhow::anyhow!("Either job_id or file is required"));
+        };
+
+        let sort_by = args.get("sort").and_then(|v| v.as_str()).unwrap_or("profit");
+        let top_n = args.get("top").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
+
+        // Find best pass
+        let best = parser.find_best_pass(&passes, sort_by);
+
+        let mut sorted_passes = passes.clone();
+        sorted_passes.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap());
+        sorted_passes.truncate(top_n);
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "total_passes": passes.len(),
+                "top_passes": sorted_passes,
+                "best": best,
+                "sort_by": sort_by,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_list_jobs(&self) -> Result<Value> {
+        let runner = OptimizationRunner::new(self.config.clone());
+        let jobs = runner.list_jobs()?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({ "jobs": jobs }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    // Analysis handlers
+    async fn handle_analyze_report(&self, args: &Value) -> Result<Value> {
+        let report_dir = args.get("report_dir")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("report_dir is required"))?;
+
+        let deals_csv = std::path::Path::new(report_dir).join("deals.csv");
+        let metrics_json = std::path::Path::new(report_dir).join("metrics.json");
+
+        if !deals_csv.exists() {
+            return Err(anyhow::anyhow!("deals.csv not found in {}", report_dir));
+        }
+
+        // Read deals
+        let deals = self.read_deals_from_csv(&deals_csv)?;
+        
+        // Read metrics
+        let metrics = if metrics_json.exists() {
+            let content = fs::read_to_string(&metrics_json)?;
+            serde_json::from_str(&content)?
+        } else {
+            Metrics::default()
+        };
+
+        let _strategy = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("grid");
+        let _deep = args.get("deep").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let analyzer = DealAnalyzer::new();
+        let result = analyzer.analyze(&deals, &metrics);
+
+        // Write analysis.json
+        let analysis_path = std::path::Path::new(report_dir).join("analysis.json");
+        fs::write(&analysis_path, serde_json::to_string_pretty(&result)?)?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "analysis_file": analysis_path.to_string_lossy(),
+                "summary": result,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    fn read_deals_from_csv(&self, path: &std::path::Path) -> Result<Vec<Deal>> {
+        let content = fs::read_to_string(path)?;
+        let mut deals = Vec::new();
+        
+        let mut lines = content.lines();
+        let _header = lines.next(); // Skip header
+        
+        for line in lines {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 12 {
+                deals.push(Deal {
+                    time: parts[0].to_string(),
+                    deal: parts[1].to_string(),
+                    symbol: parts[2].to_string(),
+                    deal_type: parts[3].to_string(),
+                    entry: parts[4].to_string(),
+                    volume: parts[5].parse().unwrap_or(0.0),
+                    price: parts[6].parse().unwrap_or(0.0),
+                    order: parts[7].to_string(),
+                    commission: parts[8].parse().unwrap_or(0.0),
+                    swap: parts[9].parse().unwrap_or(0.0),
+                    profit: parts[10].parse().unwrap_or(0.0),
+                    balance: parts[11].parse().unwrap_or(0.0),
+                    comment: parts.get(12).unwrap_or(&"").to_string(),
+                    magic: parts.get(13).map(|s| s.to_string()),
+                });
+            }
+        }
+        
+        Ok(deals)
+    }
+
+    async fn handle_compare_baseline(&self, args: &Value) -> Result<Value> {
+        let report_dir = args.get("report_dir")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("report_dir is required"))?;
+
+        let baseline_path = std::path::Path::new("config/baseline.json");
+        let metrics_path = std::path::Path::new(report_dir).join("metrics.json");
+
+        if !baseline_path.exists() {
+            return Ok(json!({
+                "content": [{ "type": "text", "text": "No baseline.json found in config/" }],
+                "isError": false
+            }));
+        }
+
+        let baseline: Value = serde_json::from_str(&fs::read_to_string(baseline_path)?)?;
+        let current: Value = serde_json::from_str(&fs::read_to_string(metrics_path)?)?;
+
+        let comparison = json!({
+            "baseline": baseline,
+            "current": current,
+            "improvements": {
+                "profit": current.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0) 
+                    - baseline.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                "drawdown": current.get("max_dd_pct").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                    - baseline.get("max_dd_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            }
+        });
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": comparison.to_string() }],
+            "isError": false
+        }))
+    }
+
+    // Set file handlers
+    async fn handle_read_set_file(&self, args: &Value) -> Result<Value> {
+        let path = args.get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("path is required"))?;
+
+        let content = fs::read_to_string(path)?;
+        let mut params = serde_json::Map::new();
+
+        for line in content.lines() {
+            if let Some((key, value)) = line.split_once(':') {
+                let key = key.trim();
+                let value = value.trim();
+                
+                if value.contains("||Y") {
+                    let parts: Vec<&str> = value.split("||").collect();
+                    if parts.len() >= 5 {
+                        params.insert(key.to_string(), json!({
+                            "value": parts[0],
+                            "from": parts[1],
+                            "step": parts[2],
+                            "to": parts[3],
+                            "optimize": true,
+                        }));
+                    }
+                } else {
+                    params.insert(key.to_string(), json!({ "value": value, "optimize": false }));
+                }
+            }
+        }
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "path": path,
+                "parameters": params,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_write_set_file(&self, args: &Value) -> Result<Value> {
+        let path = args.get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("path is required"))?;
+
+        let params = args.get("parameters")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| anyhow::anyhow!("parameters object is required"))?;
+
+        let mut lines = Vec::new();
+        for (key, value) in params {
+            if let Some(obj) = value.as_object() {
+                if obj.get("optimize").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    let from_val = obj.get("from").and_then(|v| v.as_str()).unwrap_or("0");
+                    let step = obj.get("step").and_then(|v| v.as_str()).unwrap_or("1");
+                    let to_val = obj.get("to").and_then(|v| v.as_str()).unwrap_or("0");
+                    lines.push(format!("{}={}||{}||{}||{}||Y", key, obj.get("value").and_then(|v| v.as_str()).unwrap_or("0"), from_val, step, to_val));
+                } else {
+                    lines.push(format!("{}={}", key, obj.get("value").and_then(|v| v.as_str()).unwrap_or("0")));
+                }
+            }
+        }
+
+        fs::write(path, lines.join("\n"))?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "path": path,
+                "parameters_written": lines.len(),
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_patch_set_file(&self, args: &Value) -> Result<Value> {
+        let path = args.get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("path is required"))?;
+
+        let patches = args.get("patches")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| anyhow::anyhow!("patches object is required"))?;
+
+        // Read existing file
+        let content = fs::read_to_string(path)?;
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let mut patched_count = 0;
+
+        for (key, value) in patches {
+            let new_value = if let Some(s) = value.as_str() {
+                s.to_string()
+            } else if let Some(n) = value.as_f64() {
+                n.to_string()
+            } else if let Some(b) = value.as_bool() {
+                if b { "true".to_string() } else { "false".to_string() }
+            } else {
+                value.to_string()
+            };
+
+            // Find and patch the parameter
+            let mut found = false;
+            for line in &mut lines {
+                if line.starts_with(&format!("{}:", key)) {
+                    *line = format!("{}: {}", key, new_value);
+                    found = true;
+                    patched_count += 1;
+                    break;
+                } else if line.starts_with(&format!("{}=", key)) {
+                    *line = format!("{}={}", key, new_value);
+                    found = true;
+                    patched_count += 1;
+                    break;
+                }
+            }
+
+            // If not found, add it
+            if !found {
+                lines.push(format!("{}: {}", key, new_value));
+                patched_count += 1;
+            }
+        }
+
+        fs::write(path, lines.join("\n"))?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "path": path,
+                "parameters_patched": patched_count,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_clone_set_file(&self, args: &Value) -> Result<Value> {
+        let source = args.get("source")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("source is required"))?;
+
+        let destination = args.get("destination")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("destination is required"))?;
+
+        fs::copy(source, destination)?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "source": source,
+                "destination": destination,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_diff_set_files(&self, args: &Value) -> Result<Value> {
+        let file_a = args.get("file_a")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("file_a is required"))?;
+
+        let file_b = args.get("file_b")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("file_b is required"))?;
+
+        let content_a = fs::read_to_string(file_a)?;
+        let content_b = fs::read_to_string(file_b)?;
+
+        let mut differences = Vec::new();
+
+        for (i, (line_a, line_b)) in content_a.lines().zip(content_b.lines()).enumerate() {
+            if line_a != line_b {
+                differences.push(json!({
+                    "line": i + 1,
+                    "file_a": line_a,
+                    "file_b": line_b,
+                }));
+            }
+        }
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "file_a": file_a,
+                "file_b": file_b,
+                "differences": differences,
+                "total_differences": differences.len(),
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_set_from_optimization(&self, args: &Value) -> Result<Value> {
+        let path = args.get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("path is required"))?;
+
+        let params = args.get("params")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| anyhow::anyhow!("params is required"))?;
+
+        let mut lines = Vec::new();
+        for (key, value) in params {
+            if let Some(val_str) = value.as_str() {
+                lines.push(format!("{}={}", key, val_str));
+            }
+        }
+
+        fs::write(path, lines.join("\n"))?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "path": path,
+                "parameters_written": lines.len(),
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    // Utility handlers
+    async fn handle_tail_log(&self, args: &Value) -> Result<Value> {
+        let job_id = args.get("job_id")
+            .and_then(|v| v.as_str());
+
+        let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+        let log_path = if let Some(jid) = job_id {
+            let jobs_dir = std::path::Path::new(".mt5mcp_jobs");
+            let meta_path = jobs_dir.join(format!("{}.json", jid));
+            let meta: Value = serde_json::from_str(&fs::read_to_string(meta_path)?)?;
+            meta.get("log_file").and_then(|v| v.as_str()).map(|s| s.to_string())
+        } else {
+            args.get("file").and_then(|v| v.as_str()).map(|s| s.to_string())
+        };
+
+        let log_path = log_path.ok_or_else(|| anyhow::anyhow!("Could not determine log file"))?;
+
+        let content = fs::read_to_string(&log_path)?;
+        let all_lines: Vec<&str> = content.lines().collect();
+        let start = all_lines.len().saturating_sub(lines);
+        let last_lines = &all_lines[start..];
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": last_lines.join("\n") }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_archive_report(&self, args: &Value) -> Result<Value> {
+        let report_dir = args.get("report_dir")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("report_dir is required"))?;
+
+        let delete_after = args.get("delete_after").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let history_dir = std::path::Path::new(".mt5mcp_history");
+        fs::create_dir_all(history_dir)?;
+
+        let report_name = std::path::Path::new(report_dir).file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+
+        let archive_path = history_dir.join(format!("{}.tar.gz", report_name));
+
+        // Create tarball
+        let status = std::process::Command::new("tar")
+            .args(["-czf", &archive_path.to_string_lossy(), "-C", 
+                   std::path::Path::new(report_dir).parent().unwrap().to_str().unwrap(),
+                   report_name])
+            .status()?;
+
+        if delete_after && status.success() {
+            fs::remove_dir_all(report_dir)?;
+        }
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": status.success(),
+                "archive_path": archive_path.to_string_lossy(),
+                "deleted": delete_after && status.success(),
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_archive_all_reports(&self, args: &Value) -> Result<Value> {
+        let keep_last = args.get("keep_last").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+
+        let reports_dir = self.config.reports_dir();
+        let history_dir = std::path::Path::new(".mt5mcp_history");
+        fs::create_dir_all(history_dir)?;
+
+        let mut archived = 0;
+
+        if let Ok(entries) = fs::read_dir(&reports_dir) {
+            let mut entries: Vec<_> = entries.flatten().collect();
+            entries.sort_by(|a, b| {
+                b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH)
+                    .cmp(&a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH))
+            });
+
+            for entry in entries.into_iter().skip(keep_last) {
+                let path = entry.path();
+                if path.is_dir() && !path.to_string_lossy().ends_with("_opt") {
+                    let report_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
+                    let archive_path = history_dir.join(format!("{}.tar.gz", report_name));
+
+                    let _ = std::process::Command::new("tar")
+                        .args(["-czf", &archive_path.to_string_lossy(), "-C", 
+                               path.parent().unwrap().to_str().unwrap(), report_name])
+                        .status();
+
+                    let _ = fs::remove_dir_all(&path);
+                    archived += 1;
+                }
+            }
+        }
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "archived": archived,
+                "kept": keep_last,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_promote_to_baseline(&self, args: &Value) -> Result<Value> {
+        let report_dir = args.get("report_dir")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("report_dir is required"))?;
+
+        let metrics_path = std::path::Path::new(report_dir).join("metrics.json");
+        let baseline_path = std::path::Path::new("config/baseline.json");
+
+        fs::copy(&metrics_path, &baseline_path)?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "baseline_file": baseline_path.to_string_lossy(),
+                "source": metrics_path.to_string_lossy(),
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_get_history(&self, args: &Value) -> Result<Value> {
+        let _limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+        let history_dir = std::path::Path::new(".mt5mcp_history");
+        let mut history = Vec::new();
+
+        if history_dir.exists() {
+            for entry in fs::read_dir(history_dir)? {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "tar.gz").unwrap_or(false) {
+                        let name = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        
+                        let metadata = entry.metadata()?;
+                        let modified = metadata.modified()?;
+                        let size = metadata.len();
+
+                        history.push(json!({
+                            "name": name,
+                            "path": path.to_string_lossy(),
+                            "size": size,
+                            "archived_at": modified.elapsed().map(|e| e.as_secs()).unwrap_or(0),
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "total_archived": history.len(),
+                "history": history,
+            }).to_string() }],
+            "isError": false
+        }))
+    }
+
+    async fn handle_annotate_history(&self, args: &Value) -> Result<Value> {
+        let report_name = args.get("report_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("report_name is required"))?;
+
+        let note = args.get("note")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let notes_path = std::path::Path::new(".mt5mcp_history").join("notes.json");
+        
+        let mut notes: serde_json::Map<String, Value> = if notes_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&notes_path)?)?
+        } else {
+            serde_json::Map::new()
+        };
+
+        notes.insert(report_name.to_string(), json!(note));
+        fs::write(&notes_path, serde_json::to_string_pretty(&notes)?)?;
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": true,
+                "report": report_name,
+                "note": note,
             }).to_string() }],
             "isError": false
         }))

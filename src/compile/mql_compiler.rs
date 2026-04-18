@@ -58,7 +58,7 @@ impl MqlCompiler {
         let wine_src_path = Self::host_to_wine_path(&dest_path)?;
         let wine_log_path = Self::host_to_wine_path(&log_file)?;
 
-        let output = Command::new(wine_exe)
+        let _output = Command::new(wine_exe)
             .arg(&metaeditor)
             .arg(format!("/compile:{}", wine_src_path))
             .arg(format!("/log:{}", wine_log_path))

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Stage {
     Compile,
@@ -11,6 +12,7 @@ pub enum Stage {
     Done,
 }
 
+#[allow(dead_code)]
 impl Stage {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -35,8 +37,10 @@ impl Stage {
     }
 }
 
+#[allow(dead_code)]
 pub struct StageExecutor;
 
+#[allow(dead_code)]
 impl StageExecutor {
     pub fn new() -> Self {
         Self
@@ -74,12 +78,14 @@ impl StageExecutor {
     }
 }
 
+#[allow(dead_code)]
 pub struct StageResult {
     pub success: bool,
     pub message: String,
     pub output: Option<PathBuf>,
 }
 
+#[allow(dead_code)]
 impl StageResult {
     pub fn success() -> Self {
         Self {
