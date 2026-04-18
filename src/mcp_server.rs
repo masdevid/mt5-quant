@@ -29,41 +29,71 @@ impl McpServer {
         }
     }
 
-    /// Run verify_setup on initialization and return summary
-    async fn run_auto_verify(&self) -> AutoVerifyResult {
-        // Get config from tool_handler
-        let config = ModelsConfig::load().unwrap_or_default();
+    /// Run verify_setup in background - non blocking
+    fn spawn_auto_verify(&self) {
+        let result_arc = self.auto_verify_result.clone();
         
-        // Check if config exists
-        let config_path = ModelsConfig::writable_config_path();
-        let config_exists = config_path.exists();
-        
-        // Check wine and terminal
-        let wine_ok = config.wine_executable.as_ref()
-            .map(|p| std::path::Path::new(p).exists())
-            .unwrap_or(false);
-        let term_ok = config.terminal_dir.as_ref()
-            .map(|p| std::path::Path::new(p).is_dir())
-            .unwrap_or(false);
-        
-        let all_ok = config_exists && wine_ok && term_ok;
-        
-        let hint = if all_ok {
-            "Environment fully configured and ready".to_string()
-        } else if !config_exists {
-            format!("Auto-discovery will run on first request. Config will be written to {}", config_path.display())
-        } else if !wine_ok {
-            "Wine/CrossOver not found - required for MT5 execution".to_string()
-        } else if !term_ok {
-            "MT5 directory not found - check installation".to_string()
-        } else {
-            "Fix missing paths in config".to_string()
-        };
-        
-        AutoVerifyResult {
-            all_ok,
-            hint,
-            config_path: config_path.to_string_lossy().to_string(),
+        tokio::spawn(async move {
+            // Get config
+            let config = ModelsConfig::load().unwrap_or_default();
+            let config_path = ModelsConfig::writable_config_path();
+            
+            // Quick async file checks
+            let config_exists = tokio::task::spawn_blocking({
+                let path = config_path.clone();
+                move || path.exists()
+            }).await.unwrap_or(false);
+            
+            let wine_ok = if let Some(wine) = &config.wine_executable {
+                let wine = wine.clone();
+                tokio::task::spawn_blocking(move || {
+                    std::path::Path::new(&wine).exists()
+                }).await.unwrap_or(false)
+            } else {
+                false
+            };
+            
+            let term_ok = if let Some(term) = &config.terminal_dir {
+                let term = term.clone();
+                tokio::task::spawn_blocking(move || {
+                    std::path::Path::new(&term).is_dir()
+                }).await.unwrap_or(false)
+            } else {
+                false
+            };
+            
+            let all_ok = config_exists && wine_ok && term_ok;
+            
+            let hint = if all_ok {
+                "Environment fully configured and ready".to_string()
+            } else if !config_exists {
+                format!("Auto-discovery will run on first request. Config will be written to {}", config_path.display())
+            } else if !wine_ok {
+                "Wine/CrossOver not found - required for MT5 execution".to_string()
+            } else if !term_ok {
+                "MT5 directory not found - check installation".to_string()
+            } else {
+                "Fix missing paths in config".to_string()
+            };
+            
+            let result = AutoVerifyResult {
+                all_ok,
+                hint,
+                config_path: config_path.to_string_lossy().to_string(),
+            };
+            
+            // Store result
+            let mut guard = result_arc.lock().await;
+            *guard = Some(result);
+        });
+    }
+    
+    /// Get current verify status (may be loading if called immediately after init)
+    async fn get_verify_status(&self) -> (Option<bool>, String) {
+        let guard = self.auto_verify_result.lock().await;
+        match guard.as_ref() {
+            Some(result) => (Some(result.all_ok), result.hint.clone()),
+            None => (None, "Checking environment...".to_string()),
         }
     }
 
@@ -83,23 +113,18 @@ impl McpServer {
                     "2024-11-05"
                 };
                 
-                // Run auto-verify on first initialization
-                let verify_result = self.run_auto_verify().await;
-                let all_ok = verify_result.all_ok;
-                let hint = verify_result.hint.clone();
-                
-                // Store the result
-                *self.auto_verify_result.lock().await = Some(verify_result);
+                // Start background verify (non-blocking)
+                self.spawn_auto_verify();
                 
                 *self.initialized.lock().await = true;
                 
-                // Include verify status in server info
+                // Return immediately with fast status
                 let server_info = json!({
                     "name": "MT5-Quant",
                     "version": "1.27.0",
                     "setup": {
-                        "verified": all_ok,
-                        "hint": hint,
+                        "verified": null,  // null = checking
+                        "hint": "Auto-verification running... Use verify_setup tool for detailed status",
                     }
                 });
                 
