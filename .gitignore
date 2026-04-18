@@ -28,3 +28,8 @@ CLAUDE.md
 # Logs
 *.log
 /tmp/mt5opt_*
+
+
+# Added by cargo
+
+/target

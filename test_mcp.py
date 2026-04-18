@@ -102,7 +102,7 @@ if __name__ == "__main__":
     
     # Test executable
     print("\n=== Testing PyInstaller Executable ===")
-    exe_ok = test_mcp_server(["./dist/mt5-quant"])
+    exe_ok = test_mcp_server(["./dist/mt5-quant/mt5-quant"])
     
     print("\n" + "=" * 50)
     print(f"Python source: {'OK' if python_ok else 'FAILED'}")

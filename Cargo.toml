@@ -1,0 +1,25 @@
+[package]
+name = "mt5-quant"
+version = "1.27.0"
+edition = "2021"
+description = "MT5-Quant MCP Server - Exposes MT5 backtest and optimization tools via MCP"
+authors = ["masdevid <masdevid@example.com>"]
+
+[[bin]]
+name = "mt5-quant"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.0", features = ["v4"] }
+regex = "1.0"
+dirs = "5.0"
+walkdir = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
