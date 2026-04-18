@@ -25,6 +25,9 @@ CLAUDE.md
 # Windsurf (local workflows, not for repo)
 .windsurf/
 
+# GitHub Actions (local workflows, not for repo)
+.github/workflows/
+
 # macOS
 .DS_Store
 
