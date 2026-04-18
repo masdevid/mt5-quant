@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.masdevid/mt5-quant",
+  "title": "MT5-Quant",
+  "description": "MCP server for MetaTrader 5 strategy development on macOS/Linux. 43 tools to compile MQL5 Expert Advisors, run backtests, analyze deals, and optimize parameters — no Windows required.",
+  "repository": {
+    "url": "https://github.com/masdevid/mt5-quant",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.0.0/mt5-quant-macos-arm64.tar.gz",
+      "fileSha256": "5d647e44efa32ab9a1b8e16139a3a0e4a58408ce5993cc0bf14d551184124fbb",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Path to MT5-Quant config directory (default: ~/.config/mt5-quant)",
+          "isRequired": false,
+          "format": "string",
+          "name": "MT5_MCP_HOME"
+        }
+      ]
+    }
+  ]
+}
