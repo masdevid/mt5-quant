@@ -22,12 +22,25 @@ impl McpServer {
     pub async fn handle_request(&self, request: McpRequest) -> McpResponse {
         match request.method.as_str() {
             "initialize" => {
+                // Protocol version negotiation: client sends desired version
+                let client_version = request.params.as_ref()
+                    .and_then(|p| p.get("protocolVersion"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("2024-11-05");
+                
+                // Server selects version (latest supported that client also supports)
+                let negotiated_version = if client_version.starts_with("2025-") {
+                    "2024-11-05" // Fall back to stable version
+                } else {
+                    "2024-11-05"
+                };
+                
                 *self.initialized.lock().await = true;
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
                     result: Some(json!(crate::InitializeResult {
-                        protocol_version: "2024-11-05".to_string(),
+                        protocol_version: negotiated_version.to_string(),
                         capabilities: crate::ServerCapabilities {
                             experimental: json!({}),
                             tools: crate::ToolCapabilities {
