@@ -45,30 +45,27 @@ impl MqlCompiler {
             .ok_or_else(|| anyhow!("wine_executable not configured"))?;
         let wine_prefix = self.get_wine_prefix(&mt5_dir)?;
 
-        let experts_dir = mt5_dir.join("MQL5").join("Experts");
-        fs::create_dir_all(&experts_dir)?;
+        let ea_name = source_path
+            .file_stem().and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("Invalid source file name"))?;
 
-        // Sync the full project tree to the Experts directory.
-        let sync = self.sync_project_to_experts(source_path, &experts_dir)?;
-        tracing::info!(
-            "Synced {} file(s) to Experts dir: {}",
-            sync.files_copied,
-            sync.dest_mq5.display()
-        );
+        // Stage to /tmp to avoid spaces in path (wine /compile: chokes on spaces)
+        let stage_dir = std::path::PathBuf::from(format!("/tmp/mt5_compile_{}", ea_name));
+        if stage_dir.exists() {
+            fs::remove_dir_all(&stage_dir)?;
+        }
+        fs::create_dir_all(&stage_dir)?;
 
-        let log_path = wine_prefix.join("drive_c").join("_mt5mcp_compile.log");
-        let _ = fs::remove_file(&log_path); // clear stale log before compile
+        // Sync full project tree into staging dir
+        let sync = self.sync_project_to_experts(source_path, &stage_dir)?;
+        let staged_mq5 = &sync.dest_mq5;
+        tracing::info!("Staged {} file(s) to: {}", sync.files_copied, staged_mq5.display());
 
-        self.run_metaeditor(wine_exe, &wine_prefix, &metaeditor, &sync.dest_mq5, &log_path)?;
+        self.run_metaeditor(wine_exe, &wine_prefix, &metaeditor, staged_mq5)?;
 
-        // MetaEditor writes to the /log: path. Fallback: adjacent {ea_name}.log.
-        let log_text = if log_path.exists() {
-            Self::read_log(&log_path)
-        } else {
-            let adjacent = sync.dest_mq5.with_extension("log");
-            Self::read_log(&adjacent)
-        };
-        let _ = fs::remove_file(&log_path);
+        // /log flag (no path) writes log adjacent to source: {ea_name}.log
+        let log_path = staged_mq5.with_extension("log");
+        let log_text = Self::read_log(&log_path);
         tracing::info!("Compile log ({} chars):\n{}", log_text.len(), &log_text[..log_text.len().min(500)]);
 
         // Log format: "path : error: message" / "path : warning: message"
@@ -88,12 +85,10 @@ impl MqlCompiler {
             .map(|s| s.to_string())
             .collect();
 
-        let ex5_path = sync.dest_mq5.with_extension("ex5");
+        let ex5_path = staged_mq5.with_extension("ex5");
         if !ex5_path.exists() {
-            // Ensure there's at least one error message if compilation failed
             let final_errors = if errors.is_empty() {
-                vec![format!("Compilation failed. Check compile.log for details. Last 500 chars of log:\n{}",
-                    &log_text[log_text.len().saturating_sub(500)..])]
+                vec![format!("Compilation failed. Log:\n{}", &log_text[log_text.len().saturating_sub(500)..])]
             } else {
                 errors
             };
@@ -108,21 +103,11 @@ impl MqlCompiler {
         }
 
         let binary_size = fs::metadata(&ex5_path)?.len();
-        
-        // If there are errors but .ex5 was still created, include full log for debugging
-        let final_errors = if !errors.is_empty() && errors.len() < 3 {
-            // Append raw log excerpt for context if we only caught few errors
-            let mut extended = errors;
-            extended.push(format!("[Log excerpt] {}", &log_text[..log_text.len().min(300)]));
-            extended
-        } else {
-            errors
-        };
-        
+
         Ok(CompileResult {
-            success: final_errors.is_empty(),
+            success: errors.is_empty(),
             ex5_path: Some(ex5_path),
-            errors: final_errors,
+            errors,
             warnings,
             binary_size,
             files_synced: sync.files_copied,
@@ -212,20 +197,17 @@ impl MqlCompiler {
         Ok(SyncStats { dest_mq5, files_copied })
     }
 
-    /// Run MetaEditor to compile `source_mq5`, writing a log to `log_path`.
-    /// Uses a shell script on macOS to avoid SIP stripping DYLD_* vars.
+    /// Run MetaEditor to compile `source_mq5`.
+    /// Uses Unix host path for /compile: and bare /log flag (writes log adjacent to source).
+    /// Shell script intermediary required on macOS to preserve DYLD_* vars past SIP.
     fn run_metaeditor(
         &self,
         wine_exe: &str,
         wine_prefix: &Path,
         metaeditor: &Path,
         source_mq5: &Path,
-        log_path: &Path,
     ) -> Result<()> {
-        let wine_src    = self.host_to_wine_path(source_mq5, wine_prefix)?;
-        let wine_log    = self.host_to_wine_path(log_path, wine_prefix)
-            .unwrap_or_else(|_| "C:\\_mt5mcp_compile.log".into());
-        let wine_editor = self.host_to_wine_path(metaeditor, wine_prefix)?;
+        let mt5_dir = metaeditor.parent().unwrap_or(metaeditor);
 
         if wine_exe.contains("MetaTrader 5.app") {
             let wine_bin  = Path::new(wine_exe);
@@ -237,7 +219,6 @@ impl MqlCompiler {
                 wine_root.join("lib").join("external").display(),
                 wine_root.join("lib").display(),
             );
-            // Use host path for metaeditor so wine resolves it reliably.
             let editor_host = wine_prefix.join("drive_c")
                 .join("Program Files").join("MetaTrader 5").join("MetaEditor64.exe");
             let script = format!(
@@ -245,15 +226,14 @@ impl MqlCompiler {
                  export DYLD_FALLBACK_LIBRARY_PATH='{dyld}'\n\
                  export WINEPREFIX='{prefix}'\n\
                  export WINEDEBUG='-all'\n\
-                 # Ensure wineserver is running; MetaEditor exits silently if wine session is cold.\n\
-                 pgrep -f wineserver > /dev/null 2>&1 || ('{wine}' wineboot 2>/dev/null; sleep 3)\n\
-                 '{wine}' '{editor}' '/compile:{src}' '/log:{log}'\n",
-                dyld   = dyld,
-                prefix = wine_prefix.display(),
-                wine   = wine_exe,
-                editor = editor_host.display(),
-                src    = wine_src,
-                log    = wine_log,
+                 cd '{mt5_dir}'\n\
+                 '{wine}' '{editor}' '/compile:{src}' /log 2>/dev/null\n",
+                dyld    = dyld,
+                prefix  = wine_prefix.display(),
+                wine    = wine_exe,
+                editor  = editor_host.display(),
+                mt5_dir = mt5_dir.display(),
+                src     = source_mq5.display(),
             );
             let script_path = std::env::temp_dir().join("mt5_compile.sh");
             fs::write(&script_path, &script)?;
@@ -265,29 +245,15 @@ impl MqlCompiler {
             Command::new("/bin/sh").arg(&script_path).output()?;
         } else {
             Command::new(wine_exe)
-                .arg(&wine_editor)
-                .arg(format!("/compile:{}", wine_src))
-                .arg(format!("/log:{}", wine_log))
+                .arg(metaeditor)
+                .arg(format!("/compile:{}", source_mq5.display()))
+                .arg("/log")
                 .env("WINEPREFIX", wine_prefix)
                 .env("WINEDEBUG", "-all")
+                .current_dir(mt5_dir)
                 .output()?;
         }
         Ok(())
-    }
-
-    /// Convert a host path inside the Wine prefix to a Windows path.
-    /// e.g. `{prefix}/drive_c/Program Files/MT5/foo.mq5` → `C:\Program Files\MT5\foo.mq5`
-    fn host_to_wine_path(&self, host_path: &Path, wine_prefix: &Path) -> Result<String> {
-        let abs = host_path.canonicalize()
-            .unwrap_or_else(|_| host_path.to_path_buf());
-        let drive_c = wine_prefix.join("drive_c");
-        let rel = abs.strip_prefix(&drive_c)
-            .map_err(|_| anyhow!(
-                "Path {} is outside Wine prefix drive_c ({})",
-                abs.display(), drive_c.display()
-            ))?;
-        let win_path = rel.to_string_lossy().replace('/', "\\");
-        Ok(format!("C:\\{}", win_path))
     }
 
     fn read_log(log_path: &Path) -> String {
