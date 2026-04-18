@@ -11,6 +11,8 @@ pub fn get_tools_list() -> Value {
         tool_verify_setup(),
         tool_list_symbols(),
         tool_list_experts(),
+        tool_list_indicators(),
+        tool_list_scripts(),
         tool_get_backtest_status(),
         tool_get_optimization_status(),
         tool_prune_reports(),
@@ -182,6 +184,33 @@ fn tool_list_experts() -> Value {
             "type": "object",
             "properties": {
                 "filter": { "type": "string" }
+            }
+        }
+    })
+}
+
+fn tool_list_indicators() -> Value {
+    json!({
+        "name": "list_indicators",
+        "description": "List all custom indicators in MQL5/Indicators",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filter": { "type": "string", "description": "Optional name filter pattern" },
+                "include_builtin": { "type": "boolean", "description": "Include built-in MT5 indicators", "default": false }
+            }
+        }
+    })
+}
+
+fn tool_list_scripts() -> Value {
+    json!({
+        "name": "list_scripts",
+        "description": "List all scripts in MQL5/Scripts",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filter": { "type": "string", "description": "Optional name filter pattern" }
             }
         }
     })
