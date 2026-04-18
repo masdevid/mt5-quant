@@ -27,3 +27,4 @@ encoding_rs = "0.8"
 tempfile = "3.0"
 roxmltree = "0.21.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
+base64 = "0.22"

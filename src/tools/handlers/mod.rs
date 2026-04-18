@@ -62,6 +62,7 @@ impl ToolHandler {
             "list_set_files" => setfiles::handle_list_set_files(&self.config).await,
             
             // Report handlers
+            "get_latest_report" => reports::handle_get_latest_report(&self.config, args).await,
             "list_reports" => reports::handle_list_reports(args).await,
             "search_reports" => reports::handle_search_reports(args).await,
             "prune_reports" => reports::handle_prune_reports(&self.config, args).await,

@@ -16,6 +16,7 @@ pub fn get_tools_list() -> Value {
         tool_get_backtest_status(),
         tool_get_optimization_status(),
         tool_prune_reports(),
+        tool_get_latest_report(),
         tool_list_reports(),
         tool_search_reports(),
         tool_tail_log(),
@@ -251,6 +252,19 @@ fn tool_prune_reports() -> Value {
             "type": "object",
             "properties": {
                 "keep_last": { "type": "integer" }
+            }
+        }
+    })
+}
+
+fn tool_get_latest_report() -> Value {
+    json!({
+        "name": "get_latest_report",
+        "description": "Get the latest backtest report with full details and equity chart image",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_chart": { "type": "boolean", "description": "Include equity chart as base64 PNG (default: true)", "default": true }
             }
         }
     })

@@ -1,9 +1,94 @@
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use crate::models::Config;
 use crate::storage::{ReportDb, ReportFilters};
+
+pub async fn handle_get_latest_report(_config: &Config, args: &Value) -> Result<Value> {
+    let include_chart = args.get("include_chart").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    let db = ReportDb::new(&Config::db_path());
+    if let Err(e) = db.init() {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": format!("DB error: {}", e) }],
+            "isError": true
+        }));
+    }
+
+    match db.get_latest()? {
+        Some(entry) => {
+            let mut response = json!({
+                "success": true,
+                "report": {
+                    "id": entry.id,
+                    "expert": entry.expert,
+                    "symbol": entry.symbol,
+                    "timeframe": entry.timeframe,
+                    "from_date": entry.from_date,
+                    "to_date": entry.to_date,
+                    "created_at": entry.created_at,
+                    "net_profit": entry.net_profit,
+                    "profit_factor": entry.profit_factor,
+                    "max_dd_pct": entry.max_dd_pct,
+                    "sharpe_ratio": entry.sharpe_ratio,
+                    "total_trades": entry.total_trades,
+                    "win_rate_pct": entry.win_rate_pct,
+                    "recovery_factor": entry.recovery_factor,
+                    "deposit": entry.deposit,
+                    "currency": entry.currency,
+                    "leverage": entry.leverage,
+                    "duration_seconds": entry.duration_seconds,
+                    "set_file_original": entry.set_file_original,
+                    "set_snapshot_path": entry.set_snapshot_path,
+                    "report_dir": entry.report_dir,
+                    "charts_dir": entry.charts_dir,
+                    "tags": entry.tags,
+                    "notes": entry.notes,
+                    "verdict": entry.verdict,
+                }
+            });
+
+            // Include equity chart as base64 if requested and available
+            if include_chart {
+                if let Some(charts_dir) = &entry.charts_dir {
+                    let chart_path = Path::new(charts_dir).join("equity.png");
+                    if chart_path.exists() {
+                        match fs::read(&chart_path) {
+                            Ok(bytes) => {
+                                let base64 = BASE64.encode(&bytes);
+                                response["report"]["equity_chart_base64"] = json!(base64);
+                                response["report"]["equity_chart_format"] = json!("png");
+                            }
+                            Err(e) => {
+                                response["report"]["equity_chart_error"] = json!(format!("Failed to read chart: {}", e));
+                            }
+                        }
+                    } else {
+                        response["report"]["equity_chart_error"] = json!("equity.png not found in charts_dir");
+                    }
+                } else {
+                    response["report"]["equity_chart_error"] = json!("No charts_dir available for this report");
+                }
+            }
+
+            Ok(json!({
+                "content": [{ "type": "text", "text": response.to_string() }],
+                "isError": false
+            }))
+        }
+        None => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": false,
+                    "error": "No reports found in database"
+                }).to_string() }],
+                "isError": true
+            }))
+        }
+    }
+}
 
 pub async fn handle_list_reports(args: &Value) -> Result<Value> {
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;

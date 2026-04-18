@@ -323,4 +323,55 @@ impl ReportDb {
         let n: usize = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
         Ok(n)
     }
+
+    /// Get the latest report by created_at (most recent first)
+    pub fn get_latest(&self) -> Result<Option<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports ORDER BY created_at DESC LIMIT 1"
+        )?;
+
+        let entry = stmt
+            .query_map([], |row| {
+                let tags_json: String = row.get(23)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .next();
+
+        Ok(entry)
+    }
 }
