@@ -46,6 +46,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 |-----|---------|
 | [QUICKSTART.md](docs/QUICKSTART.md) | Complete setup for macOS/Linux |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
+| [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE integration |
 | [TOOLS.md](docs/MCP_TOOLS.md) | All 43 tools (31 documented) |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
