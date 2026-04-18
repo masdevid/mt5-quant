@@ -334,6 +334,14 @@ async def list_tools() -> list[types.Tool]:
                         "type": "integer",
                         "description": "Backtest timeout in seconds (default: 900)"
                     },
+                    "shutdown": {
+                        "type": "boolean",
+                        "description": "Close MT5 after backtest completes. Default: false — MT5 stays open and report is detected via file watching. Set true for CI/headless environments."
+                    },
+                    "kill_existing": {
+                        "type": "boolean",
+                        "description": "Kill a running MT5 instance before launching. Default: false — passes config to the running instance (MT5 single-instance passthrough). Set true if passthrough does not work on your Wine setup."
+                    },
                 },
             },
         ),
@@ -1090,6 +1098,10 @@ async def handle_run_backtest(args: dict) -> dict:
         cmd.append('--deep')
     if args.get('gui'):
         cmd.append('--gui')
+    if args.get('shutdown'):
+        cmd.append('--shutdown')
+    if args.get('kill_existing'):
+        cmd.append('--kill-existing')
 
     timeout = args.get('timeout', 900)
     success, output = run_script(cmd, timeout=timeout)

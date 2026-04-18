@@ -22,6 +22,8 @@
 #   --deep               Run deep analysis (hourly + volume profile)
 #   --strategy NAME      Analysis strategy profile: grid (default) | scalper | trend | hedge | generic
 #   --timeout N          Backtest timeout in seconds (default: 900)
+#   --shutdown           Close MT5 after backtest (default: keep open). Use for CI/headless.
+#   --kill-existing      Kill a running MT5 instance before launching (default: pass config to it)
 
 set -euo pipefail
 
@@ -66,6 +68,8 @@ STRATEGY="grid"
 TIMEOUT="$DEFAULT_TIMEOUT"
 PROJECT_DIR="$(_cfg "project_dir" "")"
 GUI_MODE=false
+SHUTDOWN_TERMINAL=false
+KILL_EXISTING=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -82,11 +86,13 @@ while [[ $# -gt 0 ]]; do
         --set)       SET_FILE="$2";   shift 2 ;;
         --leverage)  LEVERAGE="$2";   shift 2 ;;
         --timeout)   TIMEOUT="$2";    shift 2 ;;
-        --skip-compile) SKIP_COMPILE=true; shift ;;
-        --skip-clean)   SKIP_CLEAN=true;   shift ;;
-        --skip-analyze) SKIP_ANALYZE=true; shift ;;
-        --deep)         DEEP_ANALYZE=true; shift ;;
-        --strategy)     STRATEGY="$2";    shift 2 ;;
+        --skip-compile) SKIP_COMPILE=true;      shift ;;
+        --skip-clean)   SKIP_CLEAN=true;        shift ;;
+        --skip-analyze) SKIP_ANALYZE=true;      shift ;;
+        --deep)         DEEP_ANALYZE=true;      shift ;;
+        --strategy)     STRATEGY="$2";          shift 2 ;;
+        --shutdown)     SHUTDOWN_TERMINAL=true; shift ;;
+        --kill-existing) KILL_EXISTING=true;    shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -255,24 +261,23 @@ _progress "BACKTEST"
 echo ""
 echo "[3/5] BACKTEST"
 
-# Guard: detect if terminal64.exe is already running (live trading mode).
-# MT5 uses a single-instance lock per Wine prefix — a second headless instance
-# exits in ~3s with no report. Kill the existing instance before proceeding.
-if pgrep -f "wine64-preloader.*terminal64\.exe" > /dev/null 2>&1; then
-    echo "  WARNING: MetaTrader 5 is already running — killing it to allow backtest."
-    echo "  (Restart MT5 manually after the backtest if needed.)"
-    # Graceful SIGTERM first, then SIGKILL after 5s
-    pkill -TERM -f "wine64-preloader.*terminal64\.exe" 2>/dev/null || true
+# Detect running MT5 instance (match terminal64.exe regardless of wine wrapper name)
+_mt5_is_running() { pgrep -f "terminal64\.exe" > /dev/null 2>&1; }
+
+MT5_WAS_RUNNING=false
+_mt5_is_running && MT5_WAS_RUNNING=true
+
+# --kill-existing: terminate running MT5 before launch (use with --shutdown for CI)
+if $KILL_EXISTING && $MT5_WAS_RUNNING; then
+    echo "  Stopping running MT5 (--kill-existing)..."
+    pkill -TERM -f "terminal64\.exe" 2>/dev/null || true
     for _i in 1 2 3 4 5; do
         sleep 1
-        pgrep -f "wine64-preloader.*terminal64\.exe" > /dev/null 2>&1 || break
+        _mt5_is_running || break
     done
-    # Force-kill if still alive
-    if pgrep -f "wine64-preloader.*terminal64\.exe" > /dev/null 2>&1; then
-        pkill -KILL -f "wine64-preloader.*terminal64\.exe" 2>/dev/null || true
-        sleep 1
-    fi
+    _mt5_is_running && { pkill -KILL -f "terminal64\.exe" 2>/dev/null || true; sleep 1; }
     echo "  MT5 stopped."
+    MT5_WAS_RUNNING=false
 fi
 
 # Build backtest.ini
@@ -281,11 +286,9 @@ REPORT_FILENAME="${REPORT_ID}.htm"
 WINE_REPORT_PATH="reports\\${REPORT_FILENAME}"
 
 INI_HOST_PATH="${MT5_DIR}/backtest_config.ini"
-mkdir -p "${MT5_DIR}/reports"
+REPORTS_HOST_DIR="${MT5_DIR}/reports"
+mkdir -p "$REPORTS_HOST_DIR"
 
-# Prepend [Common] section if login/server are configured — forces the headless
-# terminal to connect to the correct broker account (avoids "symbol not exist"
-# when live terminal uses a different broker than the backtest symbol requires).
 INI_CONTENT=""
 if [[ -n "$DEFAULT_LOGIN" && -n "$DEFAULT_SERVER" ]]; then
     INI_CONTENT="[Common]
@@ -294,6 +297,11 @@ Server=${DEFAULT_SERVER}
 
 "
 fi
+
+# ShutdownTerminal=0 (default): MT5 stays open; report detected via file watching.
+# ShutdownTerminal=1 (--shutdown): MT5 exits after backtest; process-wait mode.
+SHUTDOWN_VAL=0
+$SHUTDOWN_TERMINAL && SHUTDOWN_VAL=1
 
 INI_CONTENT+="[Tester]
 Expert=${EXPERT}.ex5
@@ -313,62 +321,117 @@ OptimizationCriterion=0
 Visual=$([[ "$GUI_MODE" == true ]] && echo 1 || echo 0)
 Report=${WINE_REPORT_PATH}
 ReplaceReport=1
-ShutdownTerminal=1
+ShutdownTerminal=${SHUTDOWN_VAL}
 "
 [[ -n "$SET_FILE" ]] && INI_CONTENT+="ExpertParameters=${EXPERT}.set
 "
 
 # MT5 requires UTF-16LE with BOM — plain UTF-8 is silently ignored
 printf "%s" "$INI_CONTENT" | iconv -f UTF-8 -t UTF-16LE > "${INI_HOST_PATH}.tmp"
-# Prepend BOM (FF FE)
 printf '\xff\xfe' | cat - "${INI_HOST_PATH}.tmp" > "${INI_HOST_PATH}"
 rm -f "${INI_HOST_PATH}.tmp"
 
-# Set Wine prefix — CRITICAL: without WINEPREFIX, Wine uses ~/.wine (wrong prefix)
-# which causes MT5 to exit immediately (no registry, no tick data, no report)
+# Set Wine prefix
 WINE_PREFIX_DIR=$(dirname "$(dirname "$(dirname "$MT5_DIR")")")
 export WINEPREFIX="$WINE_PREFIX_DIR"
 export WINEDEBUG="-all"
 
-# Write launcher batch (start /wait works correctly once WINEPREFIX is set)
+BACKTEST_START=$(date +%s)
 BAT_PATH="${WINE_PREFIX_DIR}/drive_c/_mt5mcp_run.bat"
-cat > "$BAT_PATH" << 'BATEOF'
+
+if $SHUTDOWN_TERMINAL; then
+    # ── Synchronous mode (--shutdown) ─────────────────────────────────────────
+    # terminal64.exe is a single-instance app: if MT5 is running, a second
+    # launch exits immediately with no report. Kill first to avoid this.
+    if $MT5_WAS_RUNNING; then
+        echo "  WARNING: MT5 is running — stopping it (required for --shutdown mode)."
+        pkill -TERM -f "terminal64\.exe" 2>/dev/null || true
+        for _i in 1 2 3 4 5; do sleep 1; _mt5_is_running || break; done
+        _mt5_is_running && { pkill -KILL -f "terminal64\.exe" 2>/dev/null || true; sleep 1; }
+        echo "  MT5 stopped."
+    fi
+    cat > "$BAT_PATH" << 'BATEOF'
 @echo off
 cd /d "C:\Program Files\MetaTrader 5"
 start /wait terminal64.exe /config:"C:\Program Files\MetaTrader 5\backtest_config.ini"
 BATEOF
-
-echo "  Launching MT5 (timeout: ${TIMEOUT}s) ..."
-BACKTEST_START=$(date +%s)
-
-set +e
-timeout "${TIMEOUT}" ${MT5_ARCH} "${MT5_WINE}" cmd.exe /c 'C:\_mt5mcp_run.bat' 2>/dev/null
-WINE_EXIT=$?
-set -e
-
-rm -f "$BAT_PATH"
-
-BACKTEST_ELAPSED=$(( $(date +%s) - BACKTEST_START ))
-echo "  MT5 completed in ${BACKTEST_ELAPSED}s (exit: ${WINE_EXIT})"
-
-# Give MT5 a moment to flush the report to disk
-sleep 2
-
-# ── Locate report file ────────────────────────────────────────────────────────
-MT5_REPORT=""
-# Primary: expected relative path from ini
-for ext in ".htm" ".htm.xml" ".html"; do
-    candidate="${MT5_DIR}/reports/${REPORT_ID}${ext}"
-    if [[ -f "$candidate" ]]; then
-        MT5_REPORT="$candidate"
-        break
+    echo "  Launching MT5 (timeout: ${TIMEOUT}s, shutdown mode)..."
+    set +e
+    timeout "${TIMEOUT}" ${MT5_ARCH} "${MT5_WINE}" cmd.exe /c 'C:\_mt5mcp_run.bat' 2>/dev/null
+    WINE_EXIT=$?
+    set -e
+    rm -f "$BAT_PATH"
+    BACKTEST_ELAPSED=$(( $(date +%s) - BACKTEST_START ))
+    echo "  MT5 completed in ${BACKTEST_ELAPSED}s (exit: ${WINE_EXIT})"
+    sleep 2
+    # Locate report
+    MT5_REPORT=""
+    for ext in ".htm" ".htm.xml" ".html"; do
+        candidate="${REPORTS_HOST_DIR}/${REPORT_ID}${ext}"
+        [[ -f "$candidate" ]] && { MT5_REPORT="$candidate"; break; }
+    done
+    [[ -z "$MT5_REPORT" ]] && \
+        MT5_REPORT=$(find "${MT5_DIR}" -maxdepth 3 -name "*.htm" -newer "${INI_HOST_PATH}" 2>/dev/null | head -1)
+else
+    # ── Background mode (default) ──────────────────────────────────────────────
+    # MT5 is a single-instance Windows app: if already running, launching a
+    # second instance passes the /config: args to the existing window and exits.
+    # This triggers the Strategy Tester in the running MT5 without closing it.
+    # If MT5 is not running, it starts fresh. Either way, ShutdownTerminal=0
+    # keeps it alive; we detect completion by watching for the report file.
+    if $MT5_WAS_RUNNING; then
+        echo "  MT5 is running — passing config to existing instance..."
+    else
+        echo "  Launching MT5 in background (ShutdownTerminal=0)..."
     fi
-done
-# Fallback: any HTM in MT5_DIR newer than the ini file
-if [[ -z "$MT5_REPORT" ]]; then
-    MT5_REPORT=$(find "${MT5_DIR}" -maxdepth 3 -name "*.htm" -newer "${INI_HOST_PATH}" 2>/dev/null | head -1)
+    # `start` (no /wait): cmd.exe launches terminal64.exe and returns immediately.
+    cat > "$BAT_PATH" << 'BATEOF'
+@echo off
+cd /d "C:\Program Files\MetaTrader 5"
+start terminal64.exe /config:"C:\Program Files\MetaTrader 5\backtest_config.ini"
+BATEOF
+    nohup ${MT5_ARCH} "${MT5_WINE}" cmd.exe /c 'C:\_mt5mcp_run.bat' &>/dev/null &
+    LAUNCHER_PID=$!
+    disown "$LAUNCHER_PID" 2>/dev/null || true
+    # Give the launcher time to start terminal64.exe and exit
+    sleep 5
+    rm -f "$BAT_PATH"
+
+    # ── Poll for report file ───────────────────────────────────────────────────
+    # MT5 writes the report when Strategy Tester finishes, before any shutdown.
+    REPORT_DEADLINE=$(( $(date +%s) + TIMEOUT ))
+    MT5_REPORT=""
+    echo "  Waiting for backtest report (timeout: ${TIMEOUT}s)..."
+    while [[ -z "$MT5_REPORT" ]]; do
+        if [[ $(date +%s) -ge $REPORT_DEADLINE ]]; then
+            echo "  ERROR: Timeout (${TIMEOUT}s) — no report produced." >&2
+            echo "  Possible causes:" >&2
+            echo "    - Symbol not found in MT5 history for this broker" >&2
+            echo "    - EA name mismatch (check .ex5 exists in Experts/)" >&2
+            if $MT5_WAS_RUNNING; then
+                echo "    - Running MT5 ignored the config (try: --kill-existing)" >&2
+            fi
+            exit 1
+        fi
+        sleep 5
+        ELAPSED=$(( $(date +%s) - BACKTEST_START ))
+        for ext in ".htm" ".htm.xml" ".html"; do
+            candidate="${REPORTS_HOST_DIR}/${REPORT_ID}${ext}"
+            if [[ -f "$candidate" && -s "$candidate" ]]; then
+                # Wait for file to stabilise (fully flushed to disk)
+                S1=$(stat -f%z "$candidate" 2>/dev/null || stat -c%s "$candidate")
+                sleep 2
+                S2=$(stat -f%z "$candidate" 2>/dev/null || stat -c%s "$candidate")
+                [[ "$S1" -gt 0 && "$S1" == "$S2" ]] && { MT5_REPORT="$candidate"; break 2; }
+            fi
+        done
+        printf "  ... %ds elapsed\r" "$ELAPSED"
+    done
+    BACKTEST_ELAPSED=$(( $(date +%s) - BACKTEST_START ))
+    echo "  Report ready in ${BACKTEST_ELAPSED}s"
 fi
 
+# ── Locate report file ────────────────────────────────────────────────────────
 if [[ -z "$MT5_REPORT" ]]; then
     echo "  ERROR: MT5 produced no report." >&2
     echo "  Check: symbol name, date range, EA name, and that MT5 ran to completion." >&2
