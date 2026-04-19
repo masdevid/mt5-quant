@@ -1,6 +1,6 @@
 # MT5-Quant
 
-**MCP server for MT5 strategy development on macOS/Linux.** 43 tools to compile, backtest, analyze, and optimize MQL5 Expert Advisors — no Windows required.
+**MCP server for MT5 strategy development on macOS/Linux.** 57 tools to compile, backtest, analyze, optimize, and manage MQL5 Expert Advisors — no Windows required.
 
 ```
 You: "Backtest MyEA Jan-Mar, what caused the February drawdown?"
@@ -47,12 +47,12 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [QUICKSTART.md](docs/QUICKSTART.md) | Complete setup for macOS/Linux |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
 | [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE integration |
-| [TOOLS.md](docs/MCP_TOOLS.md) | All 43 tools (31 documented) |
+| [TOOLS.md](docs/MCP_TOOLS.md) | All 57 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
 | [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |
 
-## MCP Tools (43)
+## MCP Tools (57)
 
 ### Core workflow
 
@@ -120,6 +120,30 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `cache_status` | MT5 tester cache size breakdown by symbol — check before cleaning |
 | `clean_cache` | Delete tester cache files; supports per-symbol and `dry_run` |
 
+### Pre-flight & Validation
+
+| Tool | Description |
+|------|-------------|
+| `get_active_account` | Get current MT5 account session (login, server, available symbols) |
+| `check_symbol_data_status` | Validate symbol has sufficient history data for date range |
+| `check_mt5_status` | Check if MT5 terminal is installed and ready |
+| `validate_ea_syntax` | Pre-compile syntax check without running full compilation |
+
+### Project Management
+
+| Tool | Description |
+|------|-------------|
+| `init_project` | Scaffold new MQL5 project with templates (scalper/swing/grid/basic) |
+| `create_set_template` | Generate .set parameter file from EA input variables |
+| `export_report` | Export backtest report to CSV, JSON, or Markdown |
+
+### History & Comparison
+
+| Tool | Description |
+|------|-------------|
+| `get_backtest_history` | List all backtests for EA/symbol with summary metrics |
+| `compare_backtests` | Compare 2+ backtest results side-by-side with analysis |
+
 ### .set file — read / write
 
 | Tool | Description |
@@ -137,6 +161,16 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `describe_sweep` | Swept params, value counts, and total optimization combinations |
 | `diff_set_files` | Side-by-side diff of two `.set` files — only changed params returned |
 | `set_from_optimization` | Generate a clean backtest `.set` from `get_optimization_results` params; optionally narrow sweep |
+
+### Search & Discovery
+
+| Tool | Description |
+|------|-------------|
+| `search_experts` | Search EAs by name pattern across all directories |
+| `search_indicators` | Search indicators by name pattern |
+| `search_scripts` | Search scripts by name pattern |
+| `copy_indicator_to_project` | Copy indicator to project directory |
+| `copy_script_to_project` | Copy script to project directory |
 
 Full schema: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)
 

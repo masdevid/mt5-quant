@@ -2,11 +2,13 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** This file documents 31 of 43 total tools. Missing:
+> **Documentation Status:** This file documents 49 of 57 total tools. Missing:
 > - `list_experts`, `list_indicators`, `list_scripts`
-> - `healthcheck`
-> - `search_reports`, `get_latest_report`
+> - `healthcheck`, `list_symbols`
+> - `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`
 > - Granular analytics: `analyze_monthly_pnl`, `analyze_drawdown_events`, `analyze_top_losses`, `analyze_loss_sequences`, `analyze_position_pairs`, `analyze_direction_bias`, `analyze_streaks`, `analyze_concurrent_peak`
+> - Archive/history tools: `archive_report`, `archive_all_reports`, `get_history`, `annotate_history`, `promote_to_baseline`
+> - Experts search: `search_experts`, `search_indicators`, `search_scripts`, `copy_indicator_to_project`, `copy_script_to_project`
 
 ---
 
@@ -1237,6 +1239,323 @@ List all `.set` files in the MT5 tester profiles directory with param counts, sw
 
 ---
 
+## `get_active_account`
+
+Get current MT5 account session information: login, server, and available symbols. This is essential for pre-flight checks to ensure symbol availability before backtesting.
+
+### Input schema
+
+```typescript
+{}  // No parameters
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  ready_for_backtest: boolean;    // true if account exists and symbols available
+  account: {
+    login: string;
+    server: string;
+  } | null;
+  server: string;                   // Active server name
+  available_servers: string[];      // All servers with history data
+  symbols: string[];                // Symbols available for active server
+  symbol_count: number;
+  hint: string;                     // "Ready for backtesting" or instructions
+}
+```
+
+---
+
+## `check_symbol_data_status`
+
+Validate if a symbol has sufficient historical tick data for a specified date range before running backtest. Prevents failed backtests due to missing history data.
+
+### Input schema
+
+```typescript
+{
+  symbol: string;        // e.g., "XAUUSDc"
+  from_date: string;     // "YYYY.MM.DD"
+  to_date: string;       // "YYYY.MM.DD"
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  symbol: string;
+  server: string;
+  has_sufficient_data: boolean;
+  requested_range: { from: string; to: string };
+  data_range: string;           // "YYYY.MM.DD - YYYY.MM.DD" or "unknown"
+  years_available: number;      // Count of years with data
+  hcc_files_count: number;      // Number of history cache files
+  warnings: string[] | null;    // Data range issues
+  suggestion: string;           // Action recommendation
+}
+```
+
+---
+
+## `check_mt5_status`
+
+Check if MT5 terminal is properly installed and configured. Returns comprehensive status of all required components.
+
+### Input schema
+
+```typescript
+{}  // No parameters
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  terminal_ready: boolean;      // true if all components present
+  checks: {
+    mt5_dir_exists: boolean;
+    terminal64_exe: boolean;
+    metaeditor64_exe: boolean;
+    metatester64_exe: boolean;
+    wine_executable: boolean;
+    wine_path: string | null;
+  };
+  mt5_version: string | null;
+  current_account: {
+    login: string;
+    server: string;
+  } | null;
+  hint: string;
+}
+```
+
+---
+
+## `get_backtest_history`
+
+List all backtests previously run for a specific EA and/or symbol with summary metrics. Use for tracking performance over time.
+
+### Input schema
+
+```typescript
+{
+  expert?: string;       // Filter by EA name
+  symbol?: string;       // Filter by symbol
+  limit?: number;        // Max results (default: 10)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  count: number;
+  total: number;
+  filters: {
+    expert: string | null;
+    symbol: string | null;
+  };
+  history: Array<{
+    report_dir: string;
+    date: string | null;
+    expert: string | null;
+    symbol: string | null;
+    period: string | null;
+    profit: number | null;
+    profit_factor: number | null;
+    expected_payoff: number | null;
+    drawdown_pct: number | null;
+    total_trades: number | null;
+    win_rate: number | null;
+  }>;
+  hint: string;
+}
+```
+
+---
+
+## `compare_backtests`
+
+Compare two or more backtest results side-by-side with key metrics analysis. Includes profit/drawdown differences and verdict on which performed better.
+
+### Input schema
+
+```typescript
+{
+  report_dirs: string[];  // List of report directory paths to compare
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  count: number;
+  comparisons: Array<{
+    report_dir: string;
+    expert: string | null;
+    symbol: string | null;
+    net_profit: number | null;
+    profit_factor: number | null;
+    drawdown_pct: number | null;
+    total_trades: number | null;
+    win_rate: number | null;
+    expected_payoff: number | null;
+    recovery_factor: number | null;
+    sharpe_ratio: number | null;
+  }>;
+  analysis: Array<{
+    compare_to: string | null;
+    report: string | null;
+    profit_diff: number;
+    profit_pct_change: number;
+    drawdown_diff: number;
+    profit_factor_diff: number;
+    verdict: "better" | "worse" | "mixed";
+  }> | null;
+  verdict: string | null;  // "Best: <report_dir>"
+}
+```
+
+---
+
+## `init_project`
+
+Create a new MQL5 project with standard directory structure and template files. Supports scalper, swing, grid, and basic templates.
+
+### Input schema
+
+```typescript
+{
+  name: string;                    // Project name (used for EA filename)
+  template?: "scalper" | "swing" | "grid" | "basic";  // Default: "basic"
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  project_name: string;
+  template: string;
+  created_files: string[];  // Paths to created files
+  hint: string;
+}
+```
+
+---
+
+## `validate_ea_syntax`
+
+Perform pre-compile syntax check on MQL5 source file without running full compilation. Detects common issues before expensive MetaEditor compilation.
+
+### Input schema
+
+```typescript
+{
+  path: string;  // Path to .mq5 source file
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  valid: boolean;
+  path: string;
+  checks: {
+    has_on_init: boolean;
+    has_on_tick: boolean;
+    has_on_deinit: boolean;
+    lines: number;
+  };
+  errors: Array<{
+    line: number;
+    message: string;
+    severity: "error";
+  }> | null;
+  warnings: Array<{
+    line: number;
+    message: string;
+    severity: "warning";
+  }> | null;
+  hint: string;
+}
+```
+
+---
+
+## `create_set_template`
+
+Generate a .set parameter file template based on an EA's input variables. Automatically parses input declarations from source code.
+
+### Input schema
+
+```typescript
+{
+  ea: string;              // EA name or path to .mq5/.ex5 file
+  output_path?: string;    // Optional custom output path
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  ea: string;
+  inputs_found: number;
+  inputs: Array<{
+    name: string;
+    type: string;
+    default: string;
+    description: string | null;
+  }>;
+  set_file: string;  // Path to generated file
+  hint: string;
+}
+```
+
+---
+
+## `export_report`
+
+Export backtest report to various formats (CSV, JSON, Markdown) for external analysis or sharing.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;        // Path to backtest report directory
+  format?: "csv" | "json" | "md";  // Default: "csv"
+  output_path?: string;      // Optional custom output file path
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  format: string;
+  output_file: string;
+  source: string;
+  hint: string;
+}
+```
+
+---
+
 ## `archive_report`
 
 Convert a backtest report directory into a compact JSON entry appended to `config/backtest_history.json`. Idempotent — re-archiving the same report is a no-op. Optionally deletes the source directory to reclaim disk space.
@@ -1525,6 +1844,31 @@ promote_to_baseline(notes="v1.4 after WF")     → update baseline.json
 cache_status()                                  → see symbol breakdown and total size
 clean_cache(symbol=XAUUSD, dry_run=true)        → preview
 clean_cache(symbol=XAUUSD)                      → execute
+```
+
+### Pre-flight validation
+
+```
+get_active_account()                            → current login, server, available symbols
+check_symbol_data_status(symbol=XAUUSD, from=2025.01.01, to=2025.03.31)
+                                                → verify data availability before backtest
+check_mt5_status()                              → verify MT5 installation and readiness
+validate_ea_syntax(path=MyEA.mq5)               → pre-compile syntax check
+```
+
+### Project management
+
+```
+init_project(name=MyStrategy, template=scalper)  → scaffold new EA with template
+create_set_template(ea=MyEA)                     → generate .set from EA inputs
+export_report(report_dir=..., format=csv)         → export to CSV/JSON/Markdown
+```
+
+### History and comparison
+
+```
+get_backtest_history(expert=MyEA, limit=10)       → list past backtests with metrics
+compare_backtests(report_dirs=["dir1", "dir2"])   → side-by-side comparison
 ```
 
 ### Working with set files
