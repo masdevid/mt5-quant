@@ -33,50 +33,15 @@ bash scripts/setup.sh
 
 ### 2. Register MCP Server
 
-#### Claude Code
+| Platform | Command / Config | Docs |
+|----------|------------------|------|
+| **Claude Code** | `claude mcp add mt5-quant -- $(pwd)/mt5-quant` | [Setup →](docs/QUICKSTART.md) |
+| **Windsurf** | Edit `~/.codeium/windsurf/mcp_config.json` | [WINDSURF.md →](docs/WINDSURF.md) |
+| **Cursor** | Edit `~/.cursor/mcp.json` or use Settings → MCP | [CURSOR.md →](docs/CURSOR.md) |
+| **VS Code** | Edit `.vscode/mcp.json` or run `MCP: Add Server` | [VSCODE.md →](docs/VSCODE.md) |
+| **Antigravity** | Agent Panel → ... → MCP Servers → Edit configuration | [ANTIGRAVITY.md →](docs/ANTIGRAVITY.md) |
 
-```bash
-# Navigate to your project directory first
-cd /path/to/your/mt5-quant
-
-# Register MCP server (requires absolute path)
-claude mcp add MT5-Quant -- $(pwd)/mt5-quant
-
-# Verify installation
-claude mcp list
-```
-
-#### Windsurf
-
-Add to `~/.windsurf/config.yaml`:
-
-```yaml
-mcpServers:
-  mt5-quant:
-    command: /absolute/path/to/mt5-quant
-    env:
-      MT5_MCP_HOME: /absolute/path/to/mt5-quant
-```
-
-Or use the config command:
-
-```bash
-# Get absolute path
-which mt5-quant
-
-# Add to Windsurf config
-cat >> ~/.windsurf/config.yaml << EOF
-mcpServers:
-  mt5-quant:
-    command: $(which mt5-quant)
-    env:
-      MT5_MCP_HOME: $(dirname $(which mt5-quant))
-EOF
-```
-
-**[Full Setup →](docs/QUICKSTART.md)**
-
-> **Note:** MCP servers require **absolute paths**. Use `$(pwd)` or full path like `/Users/name/mt5-quant/mt5-quant`, not relative paths like `./mt5-quant`.
+> **Note:** Use absolute paths like `/Users/name/mt5-quant/mt5-quant` or `$(pwd)/mt5-quant`, not relative paths like `./mt5-quant`.
 
 ## Quick Start
 
@@ -91,8 +56,11 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | Doc | Purpose |
 |-----|---------|
 | [QUICKSTART.md](docs/QUICKSTART.md) | Complete setup for macOS/Linux |
+| [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE setup |
+| [CURSOR.md](docs/CURSOR.md) | Cursor IDE setup |
+| [VSCODE.md](docs/VSCODE.md) | VS Code setup |
+| [ANTIGRAVITY.md](docs/ANTIGRAVITY.md) | Antigravity IDE setup |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
-| [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE integration |
 | [TOOLS.md](docs/MCP_TOOLS.md) | All 57 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
@@ -233,5 +201,3 @@ Run `verify_setup` from Claude first — it checks all paths and returns actiona
 MIT
 
 ---
-
-*Built from battle-tested production infrastructure. Every edge case in the pipeline was hit in production.*

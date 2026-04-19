@@ -22,14 +22,22 @@ bash scripts/build-rust.sh
 
 ### 2. Configure Windsurf
 
-Edit `~/.windsurf/config.yaml`:
+Edit `~/.codeium/windsurf/mcp_config.json`:
 
-```yaml
-mcpServers:
-  mt5-quant:
-    command: /Users/masdevid/jobs/mt5-quant/target/release/mt5-quant
-    env:
-      MT5_MCP_HOME: /Users/masdevid/jobs/mt5-quant
+```json
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "/Users/masdevid/jobs/mt5-quant/target/release/mt5-quant"
+    }
+  }
+}
+```
+
+Or use the automated setup:
+
+```bash
+bash scripts/setup.sh
 ```
 
 ### 3. Restart Windsurf
@@ -66,11 +74,18 @@ scp -r config/mt5-quant.yaml user@server:~/.config/mt5-quant/config/
 - **NO Python required!**
 
 ### Windsurf Config on Target Machine
-```yaml
-mcpServers:
-  mt5-quant:
-    command: /usr/local/bin/mt5-quant
+
+```json
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "/usr/local/bin/mt5-quant"
+    }
+  }
+}
 ```
+
+The binary auto-detects its config location. No environment variables needed.
 
 ## Troubleshooting
 

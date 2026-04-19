@@ -7,6 +7,16 @@
 # --keep-last N    Keep only last N backtest reports (default: 20)
 # --claude-code    Generate CLAUDE.md template and .claude/hooks/user-prompt-submit.sh
 #                  (skips main config wizard — run standalone or alongside normal setup)
+#
+# MCP Auto-Registration (per official 2025 docs):
+#   Automatically detects and registers with available MCP platforms:
+#   - Claude Code    : via 'claude mcp add' (stored in ~/.claude.json)
+#   - Windsurf     : ~/.codeium/windsurf/mcp_config.json (JSON, mcpServers)
+#   - Cursor       : ~/.cursor/mcp.json (JSON, mcpServers)
+#   - VS Code      : .vscode/mcp.json (JSON, servers - not mcpServers)
+#   - Antigravity  : mcp_config.json via UI (JSON, mcpServers)
+#
+#   Previous installations are auto-detected and uninstalled before re-registering.
 
 set -uo pipefail
 
@@ -648,6 +658,30 @@ main() {
     _bold "MT5-Quant setup — auto-detecting Wine and MT5 paths"
     echo  "────────────────────────────────────────────────────"
 
+    # ── Check for previous installation ────────────────────────────────────────
+    if _check_any_existing_registration; then
+        _yellow "Previous mt5-quant MCP installation detected on one or more platforms"
+        echo "  New path: ${REPO_DIR}/server/main.py"
+
+        local reinstall_ans="yes"
+        if ! $AUTO_YES; then
+            reinstall_ans=$(_ask "Unregister all previous installations and reinstall?" "yes")
+        fi
+
+        if [[ "$reinstall_ans" =~ ^[Yy] ]]; then
+            _unregister_all_platforms || {
+                if ! $AUTO_YES; then
+                    local force_ans
+                    force_ans=$(_ask "Some platforms failed to unregister. Continue anyway?" "no")
+                    [[ ! "$force_ans" =~ ^[Yy] ]] && exit 1
+                fi
+            }
+        else
+            echo "Aborted — keeping existing installations."
+            exit 0
+        fi
+    fi
+
     # ── Check if config already exists ───────────────────────────────────────
     if [[ -f "$CONFIG_OUT" ]] && ! $AUTO_YES; then
         _yellow "Config already exists: $CONFIG_OUT"
@@ -784,49 +818,446 @@ main() {
     _ok "Written: $CONFIG_OUT"
     echo "  Tip: see config/example.set for optimization .set file format"
 
-    # ── Register with Claude Code ──────────────────────────────────────────────
-    _offer_mcp_register
+    # ── Register with all detected MCP platforms ─────────────────────────────
+    _register_all_mcp_platforms
 
     echo ""
     _green "Setup complete!"
     echo ""
 }
 
-# ── MCP registration ──────────────────────────────────────────────────────────
-_offer_mcp_register() {
-    echo ""
-    _bold "Registering with Claude Code..."
+# ── MCP Platform Detection & Registration ───────────────────────────────────
 
-    if ! command -v claude &>/dev/null; then
-        _warn "claude CLI not found — register manually:"
+# Detect available MCP platforms and return them as a list
+detect_mcp_platforms() {
+    local platforms=()
+
+    # Claude Code
+    if command -v claude &>/dev/null; then
+        platforms+=("claude")
+    fi
+
+    # Windsurf (uses ~/.codeium/windsurf/mcp_config.json)
+    if [[ -d "$HOME/.codeium/windsurf" ]] || [[ -d "$HOME/.windsurf" ]] || command -v windsurf &>/dev/null; then
+        platforms+=("windsurf")
+    fi
+
+    # Cursor (uses ~/.cursor/mcp.json)
+    if [[ -d "$HOME/.cursor" ]] || [[ -d "$HOME/Library/Application Support/Cursor" ]] || command -v cursor &>/dev/null; then
+        platforms+=("cursor")
+    fi
+
+    # VS Code (uses .vscode/mcp.json or user profile)
+    if [[ -d "$HOME/.vscode" ]] || [[ -d "$HOME/Library/Application Support/Code" ]] || command -v code &>/dev/null; then
+        platforms+=("vscode")
+    fi
+
+    printf '%s\n' "${platforms[@]:-}"
+}
+
+# Check if mt5-quant is registered on a specific platform
+_is_registered_on_platform() {
+    local platform="$1"
+    case "$platform" in
+        claude)
+            if command -v claude &>/dev/null; then
+                local mcp_list
+                mcp_list=$(claude mcp list 2>/dev/null || true)
+                echo "$mcp_list" | grep -q "mt5-quant"
+                return $?
+            fi
+            return 1
+            ;;
+        windsurf)
+            local config_file="$HOME/.codeium/windsurf/mcp_config.json"
+            [[ -f "$config_file" ]] && grep -q '"mt5-quant"' "$config_file" 2>/dev/null
+            return $?
+            ;;
+        cursor)
+            local config_file
+            config_file="$HOME/.cursor/mcp.json"
+            [[ -f "$config_file" ]] && grep -q "mt5-quant" "$config_file" 2>/dev/null
+            return $?
+            ;;
+        vscode)
+            # VS Code uses .vscode/mcp.json in workspace or user profile
+            local workspace_config=".vscode/mcp.json"
+            local user_config
+            user_config="$HOME/.vscode/mcp.json"
+            [[ -f "$workspace_config" ]] && grep -q '"mt5-quant"' "$workspace_config" 2>/dev/null && return 0
+            [[ -f "$user_config" ]] && grep -q '"mt5-quant"' "$user_config" 2>/dev/null && return 0
+            return 1
+            ;;
+    esac
+    return 1
+}
+
+# Get registered path for a platform
+_get_platform_mcp_path() {
+    local platform="$1"
+    case "$platform" in
+        claude)
+            if command -v claude &>/dev/null; then
+                local mcp_list
+                mcp_list=$(claude mcp list 2>/dev/null || true)
+                echo "$mcp_list" | grep "mt5-quant" | head -1 | sed -E 's/.*--[[:space:]]*//' | tr -d ' '
+            fi
+            ;;
+        windsurf)
+            local config_file="$HOME/.codeium/windsurf/mcp_config.json"
+            if [[ -f "$config_file" ]]; then
+                grep -A3 '"mt5-quant"' "$config_file" 2>/dev/null | grep '"command"' | sed 's/.*"command":[[:space:]]*"\([^"]*\)".*/\1/'
+            fi
+            ;;
+        cursor)
+            local config_file="$HOME/.cursor/mcp.json"
+            if [[ -f "$config_file" ]]; then
+                grep -A3 '"mt5-quant"' "$config_file" 2>/dev/null | grep '"command"' | sed 's/.*"command":[[:space:]]*"\([^"]*\)".*/\1/'
+            fi
+            ;;
+    esac
+}
+
+# Unregister from a specific platform
+_unregister_from_platform() {
+    local platform="$1"
+    echo ""
+    _bold "Unregistering from $platform..."
+
+    case "$platform" in
+        claude)
+            if ! command -v claude &>/dev/null; then
+                _warn "claude CLI not found"
+                return 1
+            fi
+            local out
+            out=$(claude mcp remove mt5-quant 2>&1) || true
+            if echo "$out" | grep -qi "removed\|success\|deleted"; then
+                _ok "Unregistered from Claude Code"
+                return 0
+            elif echo "$out" | grep -qi "not found\|does not exist"; then
+                _ok "No existing registration on Claude Code"
+                return 0
+            else
+                _warn "Unregister result: $out"
+                return 1
+            fi
+            ;;
+        windsurf)
+            local config_file="$HOME/.codeium/windsurf/mcp_config.json"
+            if [[ -f "$config_file" ]]; then
+                # Remove mt5-quant from JSON using Python
+                if command -v python3 &>/dev/null; then
+                    python3 -c "
+import json, sys
+with open('$config_file') as f:
+    data = json.load(f)
+if 'mcpServers' in data and 'mt5-quant' in data['mcpServers']:
+    del data['mcpServers']['mt5-quant']
+    with open('$config_file', 'w') as f:
+        json.dump(data, f, indent=2)
+" && { _ok "Unregistered from Windsurf"; return 0; }
+                fi
+                _warn "Could not auto-unregister from Windsurf — edit $config_file manually"
+                return 1
+            fi
+            _ok "No existing registration on Windsurf"
+            return 0
+            ;;
+        cursor)
+            local config_file="$HOME/.cursor/mcp.json"
+            if [[ -f "$config_file" ]]; then
+                # Remove mt5-quant from JSON using Python if available, or sed as fallback
+                if command -v python3 &>/dev/null; then
+                    python3 -c "
+import json, sys
+with open('$config_file') as f:
+    data = json.load(f)
+if 'mcpServers' in data and 'mt5-quant' in data['mcpServers']:
+    del data['mcpServers']['mt5-quant']
+    with open('$config_file', 'w') as f:
+        json.dump(data, f, indent=2)
+" && { _ok "Unregistered from Cursor"; return 0; }
+                fi
+                _warn "Could not auto-unregister from Cursor — edit $config_file manually"
+                return 1
+            fi
+            _ok "No existing registration on Cursor"
+            return 0
+            ;;
+        vscode)
+            # VS Code uses 'servers' (not 'mcpServers') in mcp.json
+            local workspace_config=".vscode/mcp.json"
+            local user_config="$HOME/.vscode/mcp.json"
+            local config_file=""
+            
+            # Determine which config file to use
+            if [[ -f "$workspace_config" ]] && grep -q '"mt5-quant"' "$workspace_config" 2>/dev/null; then
+                config_file="$workspace_config"
+            elif [[ -f "$user_config" ]] && grep -q '"mt5-quant"' "$user_config" 2>/dev/null; then
+                config_file="$user_config"
+            fi
+            
+            if [[ -n "$config_file" ]]; then
+                if command -v python3 &>/dev/null; then
+                    python3 -c "
+import json, sys
+with open('$config_file') as f:
+    data = json.load(f)
+if 'servers' in data and 'mt5-quant' in data['servers']:
+    del data['servers']['mt5-quant']
+    with open('$config_file', 'w') as f:
+        json.dump(data, f, indent=2)
+" && { _ok "Unregistered from VS Code ($config_file)"; return 0; }
+                fi
+                _warn "Could not auto-unregister from VS Code — edit $config_file manually"
+                return 1
+            fi
+            _ok "No existing registration on VS Code"
+            return 0
+            ;;
+    esac
+}
+
+# Register with a specific platform
+_register_with_platform() {
+    local platform="$1"
+    local use_binary="${2:-false}"
+
+    # Determine command path (binary for Windsurf/Cursor, Python for Claude)
+    local cmd_path
+    if $use_binary && [[ -f "${REPO_DIR}/target/release/mt5-quant" ]]; then
+        cmd_path="${REPO_DIR}/target/release/mt5-quant"
+    elif [[ -f "${REPO_DIR}/mt5-quant" ]]; then
+        cmd_path="${REPO_DIR}/mt5-quant"
+    else
+        cmd_path="python3 ${REPO_DIR}/server/main.py"
+    fi
+
+    case "$platform" in
+        claude)
+            local out
+            out=$(claude mcp add mt5-quant -- $cmd_path 2>&1) || true
+            if echo "$out" | grep -qi "already\|exists"; then
+                _ok "Already registered on Claude Code"
+            elif echo "$out" | grep -qi "error\|failed"; then
+                _warn "Claude Code registration failed: $out"
+                return 1
+            else
+                _ok "Registered on Claude Code"
+            fi
+            ;;
+        windsurf)
+            local config_file="$HOME/.codeium/windsurf/mcp_config.json"
+            mkdir -p "$(dirname "$config_file")"
+
+            # Create or update JSON config
+            if command -v python3 &>/dev/null; then
+                python3 -c "
+import json, os
+config_path = '$config_file'
+data = {'mcpServers': {}}
+if os.path.exists(config_path):
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+    except:
+        pass
+if 'mcpServers' not in data:
+    data['mcpServers'] = {}
+
+data['mcpServers']['mt5-quant'] = {
+    'command': '$cmd_path'
+}
+
+with open(config_path, 'w') as f:
+    json.dump(data, f, indent=2)
+" && { _ok "Registered on Windsurf ($config_file)"; return 0; }
+            else
+                _warn "Python3 required for Windsurf registration"
+                return 1
+            fi
+            ;;
+        cursor)
+            local config_file="$HOME/.cursor/mcp.json"
+            mkdir -p "$(dirname "$config_file")"
+
+            # Create or update JSON config
+            if command -v python3 &>/dev/null; then
+                python3 -c "
+import json, os
+config_path = '$config_file'
+data = {'mcpServers': {}}
+if os.path.exists(config_path):
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+    except:
+        pass
+if 'mcpServers' not in data:
+    data['mcpServers'] = {}
+
+data['mcpServers']['mt5-quant'] = {
+    'command': '$cmd_path'
+}
+
+with open(config_path, 'w') as f:
+    json.dump(data, f, indent=2)
+" && { _ok "Registered on Cursor ($config_file)"; return 0; }
+            else
+                _warn "Python3 required for Cursor registration"
+                return 1
+            fi
+            ;;
+        vscode)
+            # VS Code uses .vscode/mcp.json (workspace) or user profile
+            # Format: { "servers": { "name": { "command": "...", "args": [...], "env": {...} } }
+            local workspace_config=".vscode/mcp.json"
+            mkdir -p ".vscode"
+            
+            if command -v python3 &>/dev/null; then
+                python3 -c "
+import json, os
+config_path = '$workspace_config'
+data = {'servers': {}}
+if os.path.exists(config_path):
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+    except:
+        pass
+if 'servers' not in data:
+    data['servers'] = {}
+
+# For stdio servers, VS Code uses 'command' and optional 'args'
+data['servers']['mt5-quant'] = {
+    'command': '$cmd_path'
+}
+
+with open(config_path, 'w') as f:
+    json.dump(data, f, indent=2)
+" && { _ok "Registered on VS Code ($workspace_config)"; return 0; }
+            else
+                _warn "Python3 required for VS Code registration"
+                return 1
+            fi
+            ;;
+    esac
+}
+
+# Check for any existing registrations across all platforms
+_check_any_existing_registration() {
+    local platforms=()
+    while IFS= read -r platform; do
+        [[ -n "$platform" ]] && platforms+=("$platform")
+    done < <(detect_mcp_platforms)
+
+    local found=false
+    for platform in "${platforms[@]}"; do
+        if _is_registered_on_platform "$platform"; then
+            found=true
+            break
+        fi
+    done
+
+    $found
+}
+
+# Unregister from all platforms
+_unregister_all_platforms() {
+    local platforms=()
+    while IFS= read -r platform; do
+        [[ -n "$platform" ]] && platforms+=("$platform")
+    done < <(detect_mcp_platforms)
+
+    for platform in "${platforms[@]}"; do
+        _is_registered_on_platform "$platform" && _unregister_from_platform "$platform"
+    done
+}
+
+# Main registration function - detects platforms and registers with all
+_register_all_mcp_platforms() {
+    echo ""
+    _bold "Detecting MCP platforms..."
+
+    local platforms=()
+    while IFS= read -r platform; do
+        [[ -n "$platform" ]] && platforms+=("$platform")
+    done < <(detect_mcp_platforms)
+
+    if [[ ${#platforms[@]} -eq 0 ]]; then
+        _warn "No MCP platforms detected (Claude, Windsurf, Cursor, VS Code)"
         echo ""
-        echo "  claude mcp add mt5-quant -- python3 \"${REPO_DIR}/server/main.py\""
+        echo "  Manual registration required:"
+        echo "  - Claude Code: claude mcp add mt5-quant -- python3 \"${REPO_DIR}/server/main.py\""
+        echo "  - Windsurf:   Edit ~/.codeium/windsurf/mcp_config.json"
+        echo "  - Cursor:     Edit ~/.cursor/mcp.json"
+        echo "  - VS Code:    Edit .vscode/mcp.json (workspace) or use MCP: Add Server command"
+        echo "  - Antigravity:Use Agent panel → MCP Servers → Manage → Edit configuration"
         echo ""
         return
     fi
 
-    local register=true
-    if ! $AUTO_YES; then
-        local ans
-        ans=$(_ask "Register mt5-quant with Claude Code now?" "yes")
-        [[ ! "$ans" =~ ^[Yy] ]] && register=false
+    _ok "Found platforms: ${platforms[*]}"
+
+    # Check for existing registrations
+    local has_existing=false
+    for platform in "${platforms[@]}"; do
+        if _is_registered_on_platform "$platform"; then
+            has_existing=true
+            local old_path
+            old_path=$(_get_platform_mcp_path "$platform")
+            _yellow "Existing registration detected on $platform"
+            [[ -n "$old_path" ]] && echo "  Current path: $old_path"
+        fi
+    done
+
+    # Prompt for reinstall if any existing registrations found
+    if $has_existing && ! $AUTO_YES; then
+        echo ""
+        local reinstall_ans
+        reinstall_ans=$(_ask "Unregister existing installations and reinstall on all platforms?" "yes")
+        if [[ ! "$reinstall_ans" =~ ^[Yy] ]]; then
+            echo "  Keeping existing registrations."
+            return
+        fi
     fi
 
-    if $register; then
-        local out
-        out=$(claude mcp add mt5-quant -- python3 "${REPO_DIR}/server/main.py" 2>&1) || true
-        if echo "$out" | grep -qi "already\|exists"; then
-            _ok "Already registered (no change needed)"
-        elif echo "$out" | grep -qi "error\|failed"; then
-            _warn "Registration failed: $out"
-            echo "  Run manually: claude mcp add mt5-quant -- python3 \"${REPO_DIR}/server/main.py\""
-        else
-            _ok "Registered: claude mcp add mt5-quant"
-        fi
-    else
-        echo "  Skipped. Run manually:"
-        echo "  claude mcp add mt5-quant -- python3 \"${REPO_DIR}/server/main.py\""
-    fi
+    # Unregister from all platforms first
+    for platform in "${platforms[@]}"; do
+        _is_registered_on_platform "$platform" && _unregister_from_platform "$platform"
+    done
+
+    # Register with all detected platforms
+    echo ""
+    _bold "Registering mt5-quant MCP..."
+
+    for platform in "${platforms[@]}"; do
+        # Use binary for Windsurf/Cursor, Python for Claude
+        case "$platform" in
+            windsurf|cursor)
+                _register_with_platform "$platform" true
+                ;;
+            *)
+                _register_with_platform "$platform" false
+                ;;
+        esac
+    done
+
+    echo ""
+    _green "MCP registration complete!"
+    echo ""
+    echo "  Registered on: ${platforms[*]}"
+    echo ""
+    echo "  Config locations:"
+    [[ " ${platforms[*]} " =~ " claude " ]] && echo "    Claude Code:   ~/.claude.json (managed via CLI)"
+    [[ " ${platforms[*]} " =~ " windsurf " ]] && echo "    Windsurf:      ~/.codeium/windsurf/mcp_config.json"
+    [[ " ${platforms[*]} " =~ " cursor " ]] && echo "    Cursor:        ~/.cursor/mcp.json"
+    [[ " ${platforms[*]} " =~ " vscode " ]] && echo "    VS Code:       .vscode/mcp.json"
+    echo ""
+    echo "  Binary: ${REPO_DIR}/target/release/mt5-quant"
+    echo "  Python: ${REPO_DIR}/server/main.py"
+    echo ""
 }
 
 main

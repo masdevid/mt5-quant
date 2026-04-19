@@ -91,14 +91,67 @@ claude mcp list
 
 ### Windsurf
 
-Add to `~/.windsurf/config.yaml`:
-```yaml
-mcpServers:
-  mt5-quant:
-    command: /path/to/mt5-quant
-    env:
-      MT5_MCP_HOME: /path/to/mt5-mcp
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant"
+    }
+  }
+}
 ```
+
+### Cursor
+
+Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+
+```json
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant"
+    }
+  }
+}
+```
+
+Or use Settings → MCP → Add Custom MCP.
+
+### VS Code
+
+Add to `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "servers": {
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant"
+    }
+  }
+}
+```
+
+Or run `MCP: Add Server` from Command Palette.
+
+### Antigravity
+
+1. Open Agent panel → Click "..." menu → MCP Servers
+2. Click "Manage MCP Servers"
+3. Click "View raw config" or "Edit configuration"
+4. Add to `mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant"
+    }
+  }
+}
+```
+5. Reload Antigravity to apply changes
 
 ## 5. Verify Setup
 
