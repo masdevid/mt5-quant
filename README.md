@@ -23,14 +23,60 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 ## Quick Install
 
+### 1. Download & Setup
+
 ```bash
 curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-macos-arm64.tar.gz
 tar -xzf mt5.tar.gz
 bash scripts/setup.sh
+```
+
+### 2. Register MCP Server
+
+#### Claude Code
+
+```bash
+# Navigate to your project directory first
+cd /path/to/your/mt5-quant
+
+# Register MCP server (requires absolute path)
 claude mcp add MT5-Quant -- $(pwd)/mt5-quant
+
+# Verify installation
+claude mcp list
+```
+
+#### Windsurf
+
+Add to `~/.windsurf/config.yaml`:
+
+```yaml
+mcpServers:
+  mt5-quant:
+    command: /absolute/path/to/mt5-quant
+    env:
+      MT5_MCP_HOME: /absolute/path/to/mt5-quant
+```
+
+Or use the config command:
+
+```bash
+# Get absolute path
+which mt5-quant
+
+# Add to Windsurf config
+cat >> ~/.windsurf/config.yaml << EOF
+mcpServers:
+  mt5-quant:
+    command: $(which mt5-quant)
+    env:
+      MT5_MCP_HOME: $(dirname $(which mt5-quant))
+EOF
 ```
 
 **[Full Setup →](docs/QUICKSTART.md)**
+
+> **Note:** MCP servers require **absolute paths**. Use `$(pwd)` or full path like `/Users/name/mt5-quant/mt5-quant`, not relative paths like `./mt5-quant`.
 
 ## Quick Start
 
