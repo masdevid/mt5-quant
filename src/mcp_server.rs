@@ -99,6 +99,18 @@ impl McpServer {
         }
     }
 
+    /// Handle a notification (no id — no response sent)
+    pub async fn handle_notification(&self, request: McpRequest) {
+        match request.method.as_str() {
+            "notifications/initialized" => {
+                // Client confirms initialization is complete — no action needed
+            }
+            _ => {
+                tracing::debug!("Unhandled notification: {}", request.method);
+            }
+        }
+    }
+
     pub async fn handle_request(&self, request: McpRequest) -> McpResponse {
         match request.method.as_str() {
             "initialize" => {
@@ -123,9 +135,8 @@ impl McpServer {
                 // Return immediately with fast status
                 let server_info = json!({
                     "name": "MT5-Quant",
-                    "version": "1.27.0",
+                    "version": env!("CARGO_PKG_VERSION"),
                     "setup": {
-                        "verified": null,  // null = checking
                         "hint": "Auto-verification running... Use verify_setup tool for detailed status",
                     }
                 });

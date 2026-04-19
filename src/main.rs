@@ -40,8 +40,11 @@ pub struct McpRequest {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct McpResponse {
     jsonrpc: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<McpError>,
 }
 
@@ -49,6 +52,7 @@ pub struct McpResponse {
 pub struct McpError {
     code: i32,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<Value>,
 }
 
@@ -113,6 +117,11 @@ async fn run_stdio_server() -> Result<()> {
                 let server_clone = server.clone();
                 match serde_json::from_str::<McpRequest>(line) {
                     Ok(request) => {
+                        // Notifications have no id — don't send a response
+                        if request.id.is_none() {
+                            server_clone.handle_notification(request).await;
+                            continue;
+                        }
                         let response = server_clone.handle_request(request).await;
                         let response_json = serde_json::to_string(&response)?;
                         println!("{}", response_json);
@@ -182,6 +191,10 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
                 
                 match serde_json::from_str::<McpRequest>(line) {
                     Ok(request) => {
+                        if request.id.is_none() {
+                            server.handle_notification(request).await;
+                            continue;
+                        }
                         let response = server.handle_request(request).await;
                         let response_json = serde_json::to_string(&response)? + "\n";
                         writer.write_all(response_json.as_bytes()).await?;
