@@ -175,7 +175,7 @@ impl McpServer {
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
-                    result: Some(crate::tools::get_tools_list()),
+                    result: Some(json!({"tools": crate::tools::get_tools_list()})),
                     error: None,
                 }
             }
