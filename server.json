@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.masdevid/mt5-quant",
   "title": "MT5-Quant",
-  "description": "MCP server for MT5 strategy development. 85 tools for backtesting, optimizing, and debugging MQL5 EAs on macOS/Linux.",
+  "description": "MT5 strategy development with 85 tools. Backtest, optimize, debug MQL5 EAs on macOS/Linux.",
   "repository": {
     "url": "https://github.com/masdevid/mt5-quant",
     "source": "github"
