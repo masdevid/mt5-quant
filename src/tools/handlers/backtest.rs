@@ -37,6 +37,7 @@ impl BacktestPreflight {
         }
     }
     
+    #[allow(dead_code)]
     fn is_ready(&self) -> bool {
         self.account.is_some() && !self.available_symbols.is_empty() && self.ea_exists
     }

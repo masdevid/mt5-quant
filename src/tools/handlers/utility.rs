@@ -1,10 +1,41 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
 use crate::models::Config;
-use walkdir::WalkDir;
+
+/// Validate that `user_path` resolves to a location within `allowed_base`.
+/// Returns the canonicalized absolute path on success.
+fn safe_output_path(user_path: &str, allowed_base: &Path) -> Result<PathBuf> {
+    // Resolve the base first (must already exist).
+    let base = allowed_base.canonicalize()
+        .with_context(|| format!("allowed base directory does not exist: {}", allowed_base.display()))?;
+
+    // Build the candidate path. If the user supplied an absolute path we use it
+    // as-is; relative paths are joined onto the base so they stay inside it.
+    let candidate = {
+        let p = Path::new(user_path);
+        if p.is_absolute() { p.to_path_buf() } else { base.join(p) }
+    };
+
+    // Canonicalize the parent directory (the file itself need not exist yet).
+    let parent = candidate.parent()
+        .ok_or_else(|| anyhow::anyhow!("output_path has no parent directory"))?;
+    let canonical_parent = parent.canonicalize()
+        .with_context(|| format!("output_path parent directory does not exist: {}", parent.display()))?;
+    let canonical = canonical_parent.join(
+        candidate.file_name()
+            .ok_or_else(|| anyhow::anyhow!("output_path must include a filename"))?,
+    );
+
+    if !canonical.starts_with(&base) {
+        return Err(anyhow::anyhow!(
+            "output_path '{}' is outside the allowed directory '{}'",
+            user_path, base.display()
+        ));
+    }
+    Ok(canonical)
+}
 
 /// Check if symbol has sufficient data for date range
 pub async fn handle_check_symbol_data_status(config: &Config, args: &Value) -> Result<Value> {
@@ -215,7 +246,7 @@ pub async fn handle_get_backtest_history(config: &Config, args: &Value) -> Resul
 }
 
 /// Compare multiple backtests
-pub async fn handle_compare_backtests(config: &Config, args: &Value) -> Result<Value> {
+pub async fn handle_compare_backtests(_config: &Config, args: &Value) -> Result<Value> {
     let report_dirs = args.get("report_dirs")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("report_dirs array is required"))?;
@@ -269,7 +300,7 @@ pub async fn handle_compare_backtests(config: &Config, args: &Value) -> Result<V
         let base_dd = base.get("drawdown_pct").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let base_pf = base.get("profit_factor").and_then(|v| v.as_f64()).unwrap_or(0.0);
         
-        for (i, comp) in comparisons.iter().enumerate().skip(1) {
+        for (_i, comp) in comparisons.iter().enumerate().skip(1) {
             let profit = comp.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dd = comp.get("drawdown_pct").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let pf = comp.get("profit_factor").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -715,7 +746,13 @@ pub async fn handle_create_set_template(config: &Config, args: &Value) -> Result
     
     // Determine output path
     let set_path = if let Some(path) = output_path {
-        Path::new(path).to_path_buf()
+        // Restrict writes to the tester profiles dir (or the EA's own dir as fallback).
+        let allowed_base = if let Some(profiles_dir) = &config.tester_profiles_dir {
+            Path::new(profiles_dir).to_path_buf()
+        } else {
+            ea_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        };
+        safe_output_path(path, &allowed_base)?
     } else if let Some(profiles_dir) = &config.tester_profiles_dir {
         Path::new(profiles_dir).join(format!("{}.set", ea))
     } else {
@@ -748,7 +785,7 @@ pub async fn handle_export_report(_config: &Config, args: &Value) -> Result<Valu
     
     let path = Path::new(report_dir);
     let metrics_path = path.join("metrics.json");
-    let deals_path = path.join("deals.csv");
+    let _deals_path = path.join("deals.csv");
     
     // Read metrics
     let metrics: Value = if metrics_path.exists() {
@@ -760,11 +797,10 @@ pub async fn handle_export_report(_config: &Config, args: &Value) -> Result<Valu
         json!({})
     };
     
-    // Determine output file
+    // Determine output file; restrict user-supplied path to the report directory.
     let output = match output_path {
-        Some(p) => Path::new(p).to_path_buf(),
-        None => path.join(format!("report.{}"
-, format))
+        Some(p) => safe_output_path(p, path)?,
+        None => path.join(format!("report.{}", format)),
     };
     
     let content = match format {
