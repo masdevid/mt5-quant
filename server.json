@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.masdevid/mt5-quant",
   "title": "MT5-Quant",
-  "description": "MCP server for MT5 strategy development with 85 tools. Compile, backtest, analyze, optimize, and debug MQL5 EAs on macOS/Linux. Includes Wine/MT5 crash diagnostics.",
+  "description": "MCP server for MT5 strategy development. 85 tools for backtesting, optimizing, and debugging MQL5 EAs on macOS/Linux.",
   "repository": {
     "url": "https://github.com/masdevid/mt5-quant",
     "source": "github"
@@ -13,7 +13,7 @@
       "registryType": "mcpb",
       "version": "1.30.0",
       "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.30.0/mcp-mt5-quant-macos-arm64.tar.gz",
-      "fileSha256": "PLACEHOLDER_SHA256",
+      "fileSha256": "6028b87c5be71db157c83e9804936190d9c3c546089e728b87496cbfc4168c0d",
       "transport": {
         "type": "stdio"
       },

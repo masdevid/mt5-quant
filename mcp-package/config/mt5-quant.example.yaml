@@ -1,0 +1,45 @@
+# mt5-quant configuration (flat key format — no YAML nesting)
+# Copy this file to config/mt5-quant.yaml and fill in your paths.
+
+# ── MT5 / Wine paths ──────────────────────────────────────────────────────────
+
+# macOS (CrossOver / MetaTrader 5.app)
+wine_executable: "/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine64"
+terminal_dir: "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5"
+experts_dir: "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/MQL5/Experts"
+tester_profiles_dir: "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester"
+tester_cache_dir: "$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/Tester"
+
+# Linux (Wine)
+# wine_executable: "/usr/bin/wine64"
+# terminal_dir: "$HOME/.wine/drive_c/Program Files/MetaTrader 5"
+# experts_dir: "$HOME/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts"
+# tester_profiles_dir: "$HOME/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester"
+# tester_cache_dir: "$HOME/.wine/drive_c/Program Files/MetaTrader 5/Tester"
+
+# ── Display ───────────────────────────────────────────────────────────────────
+# auto: GUI on macOS CrossOver, Xvfb on Linux without $DISPLAY
+# gui: always use display (requires active session)
+# headless: always use Xvfb (requires xvfb-run)
+display_mode: auto
+
+# ── Project ───────────────────────────────────────────────────────────────────
+# Root directory of your EA project (where .mq5 and .set files live)
+project_dir: "/path/to/your/ea/project"
+
+# ── Backtest defaults ─────────────────────────────────────────────────────────
+# These are fallbacks when not passed as MCP tool arguments
+backtest_symbol: "EURUSD"
+backtest_deposit: 10000
+backtest_currency: USD
+backtest_leverage: 100
+backtest_model: 0
+backtest_timeframe: H1
+backtest_timeout: 900
+
+# ── Optimization ──────────────────────────────────────────────────────────────
+opt_log_dir: /tmp
+opt_min_agents: 1
+
+# ── Reports output ────────────────────────────────────────────────────────────
+reports_dir: "/path/to/your/ea/project/reports"
