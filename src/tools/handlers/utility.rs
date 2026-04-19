@@ -841,3 +841,878 @@ pub async fn handle_export_report(_config: &Config, args: &Value) -> Result<Valu
         "isError": false
     }))
 }
+
+// === Wine & MT5 Debugging Tools ===
+
+/// Diagnose Wine installation and prefix health
+pub async fn handle_diagnose_wine(config: &Config, _args: &Value) -> Result<Value> {
+    let mut diagnostics = json!({
+        "wine_executable": null,
+        "wine_version": null,
+        "wine_prefix": null,
+        "prefix_health": null,
+        "prefix_exists": false,
+        "prefix_size_mb": 0,
+        "errors": Vec::<String>::new(),
+        "warnings": Vec::<String>::new(),
+    });
+    
+    // Check wine executable
+    if let Some(wine_exe) = config.wine_executable.as_ref() {
+        diagnostics["wine_executable"] = json!(wine_exe);
+        
+        // Get Wine version
+        let version_output = std::process::Command::new(wine_exe)
+            .arg("--version")
+            .output();
+        
+        match version_output {
+            Ok(output) if output.status.success() => {
+                let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                diagnostics["wine_version"] = json!(version);
+            }
+            _ => {
+                diagnostics["errors"].as_array_mut().unwrap().push(
+                    json!("Failed to get Wine version - Wine may not be properly installed")
+                );
+            }
+        }
+    } else {
+        diagnostics["errors"].as_array_mut().unwrap().push(
+            json!("Wine executable not configured")
+        );
+    }
+    
+    // Check Wine prefix
+    if let Some(mt5_dir) = config.mt5_dir() {
+        let wine_prefix = mt5_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent());
+        
+        if let Some(prefix) = wine_prefix {
+            diagnostics["wine_prefix"] = json!(prefix.to_string_lossy().to_string());
+            
+            // Check if prefix exists
+            let prefix_exists = prefix.exists();
+            diagnostics["prefix_exists"] = json!(prefix_exists);
+            
+            if prefix_exists {
+                // Calculate prefix size
+                let mut total_size = 0u64;
+                fn calculate_size(dir: &Path, total: &mut u64) {
+                    if let Ok(entries) = fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_file() {
+                                if let Ok(meta) = entry.metadata() {
+                                    *total += meta.len();
+                                }
+                            } else if path.is_dir() {
+                                calculate_size(&path, total);
+                            }
+                        }
+                    }
+                }
+                calculate_size(prefix, &mut total_size);
+                diagnostics["prefix_size_mb"] = json!((total_size / 1024 / 1024) as i64);
+                
+                // Check critical directories
+                let system32 = prefix.join("drive_c/windows/system32");
+                let program_files = prefix.join("drive_c/Program Files");
+                
+                if !system32.exists() {
+                    diagnostics["errors"].as_array_mut().unwrap().push(
+                        json!("Wine prefix missing system32 directory - prefix may be corrupted")
+                    );
+                    diagnostics["prefix_health"] = json!("corrupted");
+                } else if !program_files.exists() {
+                    diagnostics["warnings"].as_array_mut().unwrap().push(
+                        json!("Program Files directory not found")
+                    );
+                    diagnostics["prefix_health"] = json!("incomplete");
+                } else {
+                    diagnostics["prefix_health"] = json!("healthy");
+                }
+                
+                // Check for recent Wine errors
+                let wine_log = prefix.join("wine.log");
+                if wine_log.exists() {
+                    if let Ok(content) = fs::read_to_string(&wine_log) {
+                        let recent_errors: Vec<&str> = content.lines()
+                            .filter(|l| l.contains("err:") || l.contains("fixme:"))
+                            .rev()
+                            .take(10)
+                            .collect();
+                        if !recent_errors.is_empty() {
+                            diagnostics["recent_wine_errors"] = json!(recent_errors);
+                        }
+                    }
+                }
+            } else {
+                diagnostics["errors"].as_array_mut().unwrap().push(
+                    json!("Wine prefix directory does not exist")
+                );
+                diagnostics["prefix_health"] = json!("missing");
+            }
+        } else {
+            diagnostics["errors"].as_array_mut().unwrap().push(
+                json!("Could not determine Wine prefix from MT5 directory")
+            );
+        }
+    } else {
+        diagnostics["errors"].as_array_mut().unwrap().push(
+            json!("MT5 directory not configured")
+        );
+    }
+    
+    let has_errors = !diagnostics["errors"].as_array().unwrap().is_empty();
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": diagnostics.to_string() }],
+        "isError": has_errors
+    }))
+}
+
+/// Get MT5 terminal logs
+pub async fn handle_get_mt5_logs(config: &Config, args: &Value) -> Result<Value> {
+    let log_type = args.get("log_type").and_then(|v| v.as_str()).unwrap_or("terminal");
+    let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+    let search = args.get("search").and_then(|v| v.as_str());
+    
+    let mt5_dir = config.mt5_dir()
+        .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
+    
+    let log_path = match log_type {
+        "terminal" => mt5_dir.join("logs").join(format!("{}", chrono::Local::now().format("%Y%m%d"))),
+        "tester" => mt5_dir.join("Tester").join("logs"),
+        "metaeditor" => mt5_dir.join("MetaEditor").join("logs"),
+        _ => mt5_dir.join("logs"),
+    };
+    
+    let mut result = json!({
+        "log_type": log_type,
+        "log_path": log_path.to_string_lossy().to_string(),
+        "found": false,
+        "lines_total": 0,
+        "lines_returned": 0,
+        "content": Vec::<String>::new(),
+    });
+    
+    // Find log files
+    let mut log_files: Vec<_> = Vec::new();
+    if log_path.exists() {
+        if let Ok(entries) = fs::read_dir(&log_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == "log" {
+                            if let Ok(meta) = entry.metadata() {
+                                if let Ok(modified) = meta.modified() {
+                                    log_files.push((path, modified));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Sort by modification time (newest first)
+    log_files.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    if let Some((latest_log, _)) = log_files.first() {
+        result["found"] = json!(true);
+        
+        if let Ok(content) = fs::read_to_string(latest_log) {
+            let all_lines: Vec<&str> = content.lines().collect();
+            result["lines_total"] = json!(all_lines.len());
+            
+            // Filter and limit lines
+            let mut filtered: Vec<&str> = all_lines.clone();
+            
+            // Apply search filter
+            if let Some(search_term) = search {
+                let search_lower = search_term.to_lowercase();
+                filtered.retain(|line| line.to_lowercase().contains(&search_lower));
+            }
+            
+            // Get last N lines
+            let start = filtered.len().saturating_sub(lines);
+            let final_lines: Vec<String> = filtered[start..].iter().map(|s| s.to_string()).collect();
+            
+            result["lines_returned"] = json!(final_lines.len());
+            result["content"] = json!(final_lines);
+        }
+    }
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}
+
+/// Search MT5 logs for error patterns
+pub async fn handle_search_mt5_errors(config: &Config, args: &Value) -> Result<Value> {
+    let error_patterns = vec![
+        "error", "failed", "crash", "exception", "access violation",
+        "out of memory", "cannot", "unable to", "terminated"
+    ];
+    let hours_back = args.get("hours_back").and_then(|v| v.as_u64()).unwrap_or(24);
+    let max_errors = args.get("max_errors").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    
+    let mt5_dir = config.mt5_dir()
+        .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
+    
+    let mut errors_found = Vec::new();
+    let logs_dir = mt5_dir.join("logs");
+    let cutoff_time = std::time::SystemTime::now() - std::time::Duration::from_secs(hours_back * 3600);
+    
+    // Search recent log files
+    if logs_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&logs_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "log").unwrap_or(false) {
+                    if let Ok(meta) = entry.metadata() {
+                        if let Ok(modified) = meta.modified() {
+                            if modified >= cutoff_time {
+                                if let Ok(content) = fs::read_to_string(&path) {
+                                    for (i, line) in content.lines().enumerate() {
+                                        let line_lower = line.to_lowercase();
+                                        for pattern in &error_patterns {
+                                            if line_lower.contains(pattern) {
+                                                errors_found.push(json!({
+                                                    "file": path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                                                    "line": i + 1,
+                                                    "content": line.trim().to_string(),
+                                                    "pattern": pattern,
+                                                }));
+                                                if errors_found.len() >= max_errors {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if errors_found.len() >= max_errors {
+                    break;
+                }
+            }
+        }
+    }
+    
+    let result = json!({
+        "hours_searched": hours_back,
+        "errors_found": errors_found.len(),
+        "max_errors": max_errors,
+        "errors": errors_found,
+        "suggestion": if errors_found.is_empty() {
+            "No errors found in recent logs. Check get_mt5_logs for full log content."
+        } else {
+            "Found potential errors. Review the 'content' field for details."
+        },
+    });
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}
+
+/// Check MT5 process status
+pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result<Value> {
+    use std::process::Command;
+    
+    let mut result = json!({
+        "is_running": false,
+        "processes": Vec::<serde_json::Value>::new(),
+        "wine_server_running": false,
+        "total_instances": 0,
+    });
+    
+    #[cfg(target_os = "macos")]
+    {
+        // Check for MT5 processes
+        let ps_output = Command::new("ps")
+            .args(["aux"])
+            .output();
+        
+        if let Ok(output) = ps_output {
+            let content = String::from_utf8_lossy(&output.stdout);
+            let mut processes = Vec::new();
+            let mut mt5_count = 0;
+            let mut wine_server = false;
+            
+            for line in content.lines() {
+                let line_lower = line.to_lowercase();
+                
+                if line_lower.contains("terminal64") || line_lower.contains("metatrader") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 11 {
+                        processes.push(json!({
+                            "pid": parts[1],
+                            "cpu": parts[2],
+                            "mem": parts[3],
+                            "command": parts[10..].join(" "),
+                        }));
+                        mt5_count += 1;
+                    }
+                }
+                
+                if line_lower.contains("wineserver") {
+                    wine_server = true;
+                }
+            }
+            
+            result["processes"] = json!(processes);
+            result["is_running"] = json!(mt5_count > 0);
+            result["total_instances"] = json!(mt5_count);
+            result["wine_server_running"] = json!(wine_server);
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        let ps_output = Command::new("ps")
+            .args(["aux"])
+            .output();
+        
+        if let Ok(output) = ps_output {
+            let content = String::from_utf8_lossy(&output.stdout);
+            let mut processes = Vec::new();
+            let mut mt5_count = 0;
+            let mut wine_server = false;
+            
+            for line in content.lines() {
+                let line_lower = line.to_lowercase();
+                
+                if line_lower.contains("terminal64") || line_lower.contains("metatrader") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 11 {
+                        processes.push(json!({
+                            "pid": parts[1],
+                            "cpu": parts[2],
+                            "mem": parts[3],
+                            "command": parts[10..].join(" "),
+                        }));
+                        mt5_count += 1;
+                    }
+                }
+                
+                if line_lower.contains("wineserver") {
+                    wine_server = true;
+                }
+            }
+            
+            result["processes"] = json!(processes);
+            result["is_running"] = json!(mt5_count > 0);
+            result["total_instances"] = json!(mt5_count);
+            result["wine_server_running"] = json!(wine_server);
+        }
+    }
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}
+
+/// Kill stuck MT5 process
+pub async fn handle_kill_mt5_process(_config: &Config, args: &Value) -> Result<Value> {
+    use std::process::Command;
+    
+    let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    let pid = args.get("pid").and_then(|v| v.as_str());
+    
+    let mut killed = Vec::new();
+    let mut failed = Vec::new();
+    
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        // Get list of MT5 processes
+        let ps_output = Command::new("ps")
+            .args(["aux"])
+            .output();
+        
+        if let Ok(output) = ps_output {
+            let content = String::from_utf8_lossy(&output.stdout);
+            
+            for line in content.lines() {
+                let line_lower = line.to_lowercase();
+                
+                let should_kill = if let Some(target_pid) = pid {
+                    line.contains(target_pid) && (line_lower.contains("terminal64") || line_lower.contains("metatrader"))
+                } else {
+                    line_lower.contains("terminal64") || line_lower.contains("metatrader")
+                };
+                
+                if should_kill {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let process_pid = parts[1];
+                        let signal = if force { "-9" } else { "-15" };
+                        
+                        match Command::new("kill").args([signal, process_pid]).output() {
+                            Ok(_) => killed.push(process_pid.to_string()),
+                            Err(e) => failed.push(format!("{}: {}", process_pid, e)),
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Also kill wineserver if force=true
+        if force {
+            let _ = Command::new("killall").arg("wineserver").output();
+        }
+    }
+    
+    let message = if killed.is_empty() {
+        "No MT5 processes found to kill".to_string()
+    } else {
+        format!("Killed {} MT5 process(es)", killed.len())
+    };
+    
+    let result = json!({
+        "killed": killed,
+        "failed": failed,
+        "force": force,
+        "message": message,
+    });
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": !failed.is_empty()
+    }))
+}
+
+/// Check system resources for MT5
+pub async fn handle_check_system_resources(_config: &Config, _args: &Value) -> Result<Value> {
+    use std::process::Command;
+    
+    let mut result = json!({
+        "disk_space": null,
+        "memory": null,
+        "cpu_cores": 0,
+        "recommendations": Vec::<String>::new(),
+    });
+    
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        // Check disk space
+        let df_output = Command::new("df")
+            .args(["-h", "/"])
+            .output();
+        
+        if let Ok(output) = df_output {
+            let content = String::from_utf8_lossy(&output.stdout);
+            for line in content.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    result["disk_space"] = json!({
+                        "filesystem": parts[0],
+                        "size": parts[1],
+                        "used": parts[2],
+                        "available": parts[3],
+                        "use_percent": parts[4],
+                    });
+                    
+                    // Check if low on space
+                    let use_pct = parts[4].trim_end_matches('%').parse::<u32>().unwrap_or(0);
+                    if use_pct > 90 {
+                        result["recommendations"].as_array_mut().unwrap().push(
+                            json!("Disk space critically low. Clean MT5 cache with clean_cache.")
+                        );
+                    } else if use_pct > 80 {
+                        result["recommendations"].as_array_mut().unwrap().push(
+                            json!("Disk space getting low. Consider cleaning cache.")
+                        );
+                    }
+                }
+            }
+        }
+        
+        // Check memory
+        #[cfg(target_os = "macos")]
+        {
+            let vm_output = Command::new("vm_stat").output();
+            if let Ok(output) = vm_output {
+                let content = String::from_utf8_lossy(&output.stdout);
+                // Parse vm_stat output
+                let mut free_pages = 0u64;
+                let mut active_pages = 0u64;
+                let mut inactive_pages = 0u64;
+                
+                for line in content.lines() {
+                    if line.contains("Pages free:") {
+                        free_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
+                    } else if line.contains("Pages active:") {
+                        active_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
+                    } else if line.contains("Pages inactive:") {
+                        inactive_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
+                    }
+                }
+                
+                let page_size = 4096u64;
+                let total_mb = ((free_pages + active_pages + inactive_pages) * page_size) / 1024 / 1024;
+                let free_mb = (free_pages * page_size) / 1024 / 1024;
+                
+                result["memory"] = json!({
+                    "total_mb": total_mb,
+                    "free_mb": free_mb,
+                    "unit": "MB",
+                });
+                
+                if free_mb < 2048 {
+                    result["recommendations"].as_array_mut().unwrap().push(
+                        json!("Low memory available. MT5 may crash during large optimizations.")
+                    );
+                }
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            let mem_output = Command::new("free").args(["-m"]).output();
+            if let Ok(output) = mem_output {
+                let content = String::from_utf8_lossy(&output.stdout);
+                for line in content.lines() {
+                    if line.starts_with("Mem:") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 4 {
+                            result["memory"] = json!({
+                                "total_mb": parts[1].parse::<u64>().unwrap_or(0),
+                                "used_mb": parts[2].parse::<u64>().unwrap_or(0),
+                                "free_mb": parts[3].parse::<u64>().unwrap_or(0),
+                                "unit": "MB",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Get CPU cores
+        let nproc_output = Command::new("sysctl")
+            .args(["-n", "hw.ncpu"])
+            .output();
+        
+        if let Ok(output) = nproc_output {
+            let cores = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+            result["cpu_cores"] = json!(cores);
+        }
+    }
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}
+
+/// Validate MT5 configuration files
+pub async fn handle_validate_mt5_config(config: &Config, _args: &Value) -> Result<Value> {
+    let mt5_dir = config.mt5_dir()
+        .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
+    
+    let mut result = json!({
+        "terminal_ini": null,
+        "tester_ini": null,
+        "config_files_found": Vec::<String>::new(),
+        "errors": Vec::<String>::new(),
+        "warnings": Vec::<String>::new(),
+    });
+    
+    // Check terminal.ini
+    let terminal_ini = mt5_dir.join("terminal.ini");
+    if terminal_ini.exists() {
+        result["config_files_found"].as_array_mut().unwrap().push(json!("terminal.ini"));
+        
+        if let Ok(content) = fs::read_to_string(&terminal_ini) {
+            // Check for common issues
+            if !content.contains("[Common]") {
+                result["errors"].as_array_mut().unwrap().push(
+                    json!("terminal.ini missing [Common] section")
+                );
+            }
+            
+            // Extract key settings
+            let mut settings = serde_json::Map::new();
+            for line in content.lines() {
+                if line.starts_with("Login=") {
+                    settings.insert("login".to_string(), json!(line.trim_start_matches("Login=")));
+                } else if line.starts_with("Server=") {
+                    settings.insert("server".to_string(), json!(line.trim_start_matches("Server=")));
+                } else if line.starts_with("Expert=") {
+                    settings.insert("expert".to_string(), json!(line.trim_start_matches("Expert=")));
+                }
+            }
+            result["terminal_ini"] = json!(settings);
+        } else {
+            result["errors"].as_array_mut().unwrap().push(
+                json!("Could not read terminal.ini")
+            );
+        }
+    } else {
+        result["warnings"].as_array_mut().unwrap().push(
+            json!("terminal.ini not found")
+        );
+    }
+    
+    // Check for tester config
+    let tester_dir = mt5_dir.join("Tester");
+    if tester_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&tester_dir) {
+            let ini_files: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension()?.to_str()? == "ini" {
+                        Some(p.file_name()?.to_string_lossy().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            
+            if !ini_files.is_empty() {
+                result["tester_ini"] = json!(ini_files);
+            }
+        }
+    }
+    
+    // Check for common problems
+    let experts_dir = mt5_dir.join("MQL5").join("Experts");
+    if !experts_dir.exists() {
+        result["errors"].as_array_mut().unwrap().push(
+            json!("MQL5/Experts directory not found - MT5 installation may be incomplete")
+        );
+    }
+    
+    let has_errors = !result["errors"].as_array().unwrap().is_empty();
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": has_errors
+    }))
+}
+
+/// Get Wine prefix detailed information
+pub async fn handle_get_wine_prefix_info(config: &Config, _args: &Value) -> Result<Value> {
+    let mt5_dir = config.mt5_dir()
+        .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
+    
+    let wine_prefix = mt5_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent());
+    
+    let mut result = json!({
+        "prefix_path": null,
+        "exists": false,
+        "windows_version": null,
+        "dll_overrides": Vec::<String>::new(),
+        "installed_programs": Vec::<String>::new(),
+        "registry_files": Vec::<String>::new(),
+        "drive_c_size_mb": 0,
+    });
+    
+    if let Some(prefix) = wine_prefix {
+        result["prefix_path"] = json!(prefix.to_string_lossy().to_string());
+        result["exists"] = json!(prefix.exists());
+        
+        if prefix.exists() {
+            // Check Windows version
+            let system_reg = prefix.join("system.reg");
+            if system_reg.exists() {
+                if let Ok(content) = fs::read_to_string(&system_reg) {
+                    for line in content.lines().take(50) {
+                        if line.contains("\"ProductName\"") {
+                            let parts: Vec<&str> = line.split('"').collect();
+                            if parts.len() >= 4 {
+                                result["windows_version"] = json!(parts[3]);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Calculate drive_c size
+            let drive_c = prefix.join("drive_c");
+            if drive_c.exists() {
+                let mut size = 0u64;
+                fn calc_size(dir: &Path, total: &mut u64) {
+                    if let Ok(entries) = fs::read_dir(dir) {
+                        for e in entries.flatten() {
+                            let p = e.path();
+                            if p.is_file() {
+                                if let Ok(m) = e.metadata() {
+                                    *total += m.len();
+                                }
+                            } else if p.is_dir() {
+                                calc_size(&p, total);
+                            }
+                        }
+                    }
+                }
+                calc_size(&drive_c, &mut size);
+                result["drive_c_size_mb"] = json!((size / 1024 / 1024) as i64);
+            }
+            
+            // Check for installed programs
+            let prog_files = prefix.join("drive_c").join("Program Files");
+            if prog_files.exists() {
+                if let Ok(entries) = fs::read_dir(&prog_files) {
+                    let programs: Vec<String> = entries
+                        .flatten()
+                        .filter_map(|e| {
+                            let p = e.path();
+                            if p.is_dir() {
+                                Some(p.file_name()?.to_string_lossy().to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    result["installed_programs"] = json!(programs);
+                }
+            }
+            
+            // List registry files
+            let reg_files: Vec<String> = vec![
+                "system.reg", "user.reg", "userdef.reg"
+            ]
+            .into_iter()
+            .filter(|f| prefix.join(f).exists())
+            .map(|f| f.to_string())
+            .collect();
+            result["registry_files"] = json!(reg_files);
+        }
+    }
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}
+
+/// Get backtest crash/failure information
+pub async fn handle_get_backtest_crash_info(config: &Config, args: &Value) -> Result<Value> {
+    let report_dir = args.get("report_dir").and_then(|v| v.as_str());
+    let check_recent = args.get("check_recent").and_then(|v| v.as_bool()).unwrap_or(true);
+    let hours_back = args.get("hours_back").and_then(|v| v.as_u64()).unwrap_or(6);
+    
+    let mut result = json!({
+        "crashes_found": Vec::<serde_json::Value>::new(),
+        "recent_failures": 0,
+        "common_patterns": Vec::<String>::new(),
+    });
+    
+    // Check specific report directory if provided
+    if let Some(dir) = report_dir {
+        let path = Path::new(dir);
+        if path.exists() {
+            // Check for incomplete markers
+            let incomplete_marker = path.join(".incomplete");
+            let error_log = path.join("error.log");
+            
+            if incomplete_marker.exists() {
+                result["crashes_found"].as_array_mut().unwrap().push(json!({
+                    "report_dir": dir,
+                    "type": "incomplete",
+                    "reason": "Backtest was interrupted or timed out",
+                }));
+            }
+            
+            if error_log.exists() {
+                if let Ok(content) = fs::read_to_string(&error_log) {
+                    result["crashes_found"].as_array_mut().unwrap().push(json!({
+                        "report_dir": dir,
+                        "type": "error_log",
+                        "content": content.lines().take(20).collect::<Vec<_>>().join("\n"),
+                    }));
+                }
+            }
+            
+            // Check if deals.csv is missing or empty
+            let deals_csv = path.join("deals.csv");
+            if !deals_csv.exists() {
+                result["crashes_found"].as_array_mut().unwrap().push(json!({
+                    "report_dir": dir,
+                    "type": "missing_deals",
+                    "reason": "deals.csv not found - backtest likely failed",
+                }));
+            } else if let Ok(meta) = deals_csv.metadata() {
+                if meta.len() < 100 {
+                    result["crashes_found"].as_array_mut().unwrap().push(json!({
+                        "report_dir": dir,
+                        "type": "empty_deals",
+                        "reason": "deals.csv is nearly empty - no trades were made",
+                    }));
+                }
+            }
+        }
+    }
+    
+    // Check recent reports if requested
+    if check_recent {
+        let reports_dir_str = config.get("reports_dir");
+        let reports_dir = Path::new(&reports_dir_str);
+        if reports_dir.exists() {
+            let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(hours_back * 3600);
+            
+            if let Ok(entries) = fs::read_dir(&reports_dir) {
+                let mut failures = 0;
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Ok(meta) = entry.metadata() {
+                            if let Ok(modified) = meta.modified() {
+                                if modified >= cutoff {
+                                    // Check for failure indicators
+                                    let has_deals = path.join("deals.csv").exists();
+                                    let has_incomplete = path.join(".incomplete").exists();
+                                    
+                                    if !has_deals || has_incomplete {
+                                        failures += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                result["recent_failures"] = json!(failures);
+            }
+        }
+    }
+    
+    // Analyze common patterns
+    let crashes = result["crashes_found"].as_array().unwrap();
+    if !crashes.is_empty() {
+        let types: Vec<String> = crashes.iter()
+            .filter_map(|c| c.get("type").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect();
+        
+        if types.contains(&"missing_deals".to_string()) {
+            result["common_patterns"].as_array_mut().unwrap().push(
+                json!("Missing deals.csv suggests MT5 crashed during backtest")
+            );
+        }
+        if types.contains(&"incomplete".to_string()) {
+            result["common_patterns"].as_array_mut().unwrap().push(
+                json!("Incomplete markers indicate interruptions - check system resources")
+            );
+        }
+    }
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": result.to_string() }],
+        "isError": false
+    }))
+}

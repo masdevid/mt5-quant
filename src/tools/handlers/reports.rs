@@ -433,3 +433,418 @@ pub async fn handle_annotate_history(args: &Value) -> Result<Value> {
         "isError": false
     }))
 }
+
+pub async fn handle_get_report_by_id(_config: &Config, args: &Value) -> Result<Value> {
+    let id = args.get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("id is required"))?;
+    let include_chart = args.get("include_chart").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    match db.get_by_id(id)? {
+        Some(entry) => {
+            let mut response = json!({
+                "success": true,
+                "report": {
+                    "id": entry.id,
+                    "expert": entry.expert,
+                    "symbol": entry.symbol,
+                    "timeframe": entry.timeframe,
+                    "from_date": entry.from_date,
+                    "to_date": entry.to_date,
+                    "created_at": entry.created_at,
+                    "net_profit": entry.net_profit,
+                    "profit_factor": entry.profit_factor,
+                    "max_dd_pct": entry.max_dd_pct,
+                    "sharpe_ratio": entry.sharpe_ratio,
+                    "total_trades": entry.total_trades,
+                    "win_rate_pct": entry.win_rate_pct,
+                    "recovery_factor": entry.recovery_factor,
+                    "deposit": entry.deposit,
+                    "currency": entry.currency,
+                    "leverage": entry.leverage,
+                    "duration_seconds": entry.duration_seconds,
+                    "set_file_original": entry.set_file_original,
+                    "set_snapshot_path": entry.set_snapshot_path,
+                    "report_dir": entry.report_dir,
+                    "charts_dir": entry.charts_dir,
+                    "tags": entry.tags,
+                    "notes": entry.notes,
+                    "verdict": entry.verdict,
+                }
+            });
+
+            if include_chart {
+                if let Some(charts_dir) = &entry.charts_dir {
+                    let chart_path = Path::new(charts_dir).join("equity.png");
+                    if chart_path.exists() {
+                        match fs::read(&chart_path) {
+                            Ok(bytes) => {
+                                let base64 = BASE64.encode(&bytes);
+                                response["report"]["equity_chart_base64"] = json!(base64);
+                                response["report"]["equity_chart_format"] = json!("png");
+                            }
+                            Err(e) => {
+                                response["report"]["equity_chart_error"] = json!(format!("Failed to read chart: {}", e));
+                            }
+                        }
+                    } else {
+                        response["report"]["equity_chart_error"] = json!("equity.png not found in charts_dir");
+                    }
+                }
+            }
+
+            Ok(json!({
+                "content": [{ "type": "text", "text": response.to_string() }],
+                "isError": false
+            }))
+        }
+        None => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": false,
+                    "error": format!("Report with id '{}' not found", id)
+                }).to_string() }],
+                "isError": true
+            }))
+        }
+    }
+}
+
+pub async fn handle_get_reports_summary(args: &Value) -> Result<Value> {
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let filters = ReportFilters {
+        expert: args.get("expert").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        symbol: args.get("symbol").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        timeframe: args.get("timeframe").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        verdict: args.get("verdict").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        ..Default::default()
+    };
+
+    let stats = db.get_stats(&filters)?;
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "total_count": stats.total_count,
+            "profitable_count": stats.profitable_count,
+            "pass_verdict_count": stats.pass_verdict_count,
+            "fail_verdict_count": stats.fail_verdict_count,
+            "marginal_verdict_count": stats.marginal_verdict_count,
+            "avg_net_profit": stats.avg_net_profit,
+            "avg_profit_factor": stats.avg_profit_factor,
+            "avg_max_dd_pct": stats.avg_max_dd_pct,
+            "avg_win_rate_pct": stats.avg_win_rate_pct,
+            "avg_sharpe_ratio": stats.avg_sharpe_ratio,
+            "profitable_rate": if stats.total_count > 0 {
+                (stats.profitable_count as f64 / stats.total_count as f64 * 100.0).round()
+            } else { 0.0 },
+            "pass_rate": if stats.total_count > 0 {
+                (stats.pass_verdict_count as f64 / stats.total_count as f64 * 100.0).round()
+            } else { 0.0 },
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_get_best_reports(args: &Value) -> Result<Value> {
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let sort_by = args.get("sort_by").and_then(|v| v.as_str()).unwrap_or("profit_factor");
+    let order = args.get("order").and_then(|v| v.as_str()).unwrap_or("desc");
+    let ascending = order == "asc";
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+
+    let filters = ReportFilters {
+        expert: args.get("expert").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        symbol: args.get("symbol").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        timeframe: args.get("timeframe").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        verdict: args.get("verdict").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        ..Default::default()
+    };
+
+    let entries = db.get_sorted_by(sort_by, ascending, limit, &filters)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "sharpe_ratio": e.sharpe_ratio,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file": e.set_file_original,
+            "verdict": e.verdict,
+            "tags": e.tags,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "sort_by": sort_by,
+            "order": order,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_search_reports_by_tags(args: &Value) -> Result<Value> {
+    let tags: Vec<String> = args
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .ok_or_else(|| anyhow::anyhow!("tags array is required"))?;
+
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let entries = db.search_by_tags(&tags, limit)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file": e.set_file_original,
+            "verdict": e.verdict,
+            "tags": e.tags,
+            "notes": e.notes,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "tags": tags,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_search_reports_by_date_range(args: &Value) -> Result<Value> {
+    let from_start = args.get("from_start").and_then(|v| v.as_str());
+    let from_end = args.get("from_end").and_then(|v| v.as_str());
+    let to_start = args.get("to_start").and_then(|v| v.as_str());
+    let to_end = args.get("to_end").and_then(|v| v.as_str());
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let entries = db.search_by_date_range(from_start, from_end, to_start, to_end, limit)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file": e.set_file_original,
+            "verdict": e.verdict,
+            "tags": e.tags,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "from_start": from_start,
+            "from_end": from_end,
+            "to_start": to_start,
+            "to_end": to_end,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_search_reports_by_notes(args: &Value) -> Result<Value> {
+    let query = args.get("query")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("query is required"))?;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let entries = db.search_by_notes(query, limit)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file": e.set_file_original,
+            "verdict": e.verdict,
+            "notes": e.notes,
+            "tags": e.tags,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "query": query,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_get_reports_by_set_file(args: &Value) -> Result<Value> {
+    let set_file = args.get("set_file")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("set_file is required"))?;
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    let entries = db.search_by_set_file(set_file, limit)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file_original": e.set_file_original,
+            "set_snapshot_path": e.set_snapshot_path,
+            "verdict": e.verdict,
+            "tags": e.tags,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "set_file": set_file,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_get_comparable_reports(args: &Value) -> Result<Value> {
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
+
+    // Get expert/symbol/timeframe either from report_id or direct args
+    let (expert, symbol, timeframe, exclude_id) = if let Some(id) = args.get("report_id").and_then(|v| v.as_str()) {
+        match db.get_by_id(id)? {
+            Some(entry) => {
+                let exclude = args.get("exclude_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                (entry.expert, entry.symbol, entry.timeframe, exclude.unwrap_or_else(|| id.to_string()))
+            }
+            None => return Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": false,
+                    "error": format!("Report with id '{}' not found", id)
+                }).to_string() }],
+                "isError": true
+            }))
+        }
+    } else {
+        let expert = args.get("expert").and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("expert or report_id is required"))?;
+        let symbol = args.get("symbol").and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("symbol or report_id is required"))?;
+        let timeframe = args.get("timeframe").and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("timeframe or report_id is required"))?;
+        let exclude_id = args.get("exclude_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        (expert.to_string(), symbol.to_string(), timeframe.to_string(), exclude_id.unwrap_or_default())
+    };
+
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let exclude_opt = if exclude_id.is_empty() { None } else { Some(exclude_id.as_str()) };
+
+    let entries = db.get_comparable(&expert, &symbol, &timeframe, exclude_opt, limit)?;
+
+    let reports: Vec<Value> = entries
+        .iter()
+        .map(|e| json!({
+            "id": e.id,
+            "expert": e.expert,
+            "symbol": e.symbol,
+            "timeframe": e.timeframe,
+            "from_date": e.from_date,
+            "to_date": e.to_date,
+            "created_at": e.created_at,
+            "net_profit": e.net_profit,
+            "profit_factor": e.profit_factor,
+            "max_dd_pct": e.max_dd_pct,
+            "total_trades": e.total_trades,
+            "win_rate_pct": e.win_rate_pct,
+            "set_file": e.set_file_original,
+            "verdict": e.verdict,
+            "tags": e.tags,
+        }))
+        .collect();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "expert": expert,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "exclude_id": exclude_id,
+            "matched": reports.len(),
+            "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}

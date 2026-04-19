@@ -165,3 +165,149 @@ pub fn tool_export_report() -> Value {
         }
     })
 }
+
+pub fn tool_diagnose_wine() -> Value {
+    json!({
+        "name": "diagnose_wine",
+        "description": "Check Wine installation, version, and prefix health. Reports errors, warnings, and recent Wine errors.",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}
+
+pub fn tool_get_mt5_logs() -> Value {
+    json!({
+        "name": "get_mt5_logs",
+        "description": "Get MT5 terminal, tester, or MetaEditor logs with optional search filtering",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "log_type": {
+                    "type": "string",
+                    "enum": ["terminal", "tester", "metaeditor"],
+                    "default": "terminal",
+                    "description": "Type of log to retrieve"
+                },
+                "lines": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Number of lines to return (from end of log)"
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Optional search term to filter log lines"
+                }
+            }
+        }
+    })
+}
+
+pub fn tool_search_mt5_errors() -> Value {
+    json!({
+        "name": "search_mt5_errors",
+        "description": "Search MT5 logs for error patterns (error, failed, crash, exception, etc.) in recent hours",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "hours_back": {
+                    "type": "integer",
+                    "default": 24,
+                    "description": "Hours to search back in logs"
+                },
+                "max_errors": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of errors to return"
+                }
+            }
+        }
+    })
+}
+
+pub fn tool_check_mt5_process() -> Value {
+    json!({
+        "name": "check_mt5_process",
+        "description": "Check if MT5 processes are running, get process info (PID, CPU, memory usage)",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}
+
+pub fn tool_kill_mt5_process() -> Value {
+    json!({
+        "name": "kill_mt5_process",
+        "description": "Kill stuck MT5 processes. Use force=true for stuck wineserver.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "string",
+                    "description": "Optional specific PID to kill"
+                },
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Use SIGKILL (-9) instead of SIGTERM (-15), also kills wineserver"
+                }
+            }
+        }
+    })
+}
+
+pub fn tool_check_system_resources() -> Value {
+    json!({
+        "name": "check_system_resources",
+        "description": "Check disk space, memory, and CPU. Warns if resources are low for MT5 operations.",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}
+
+pub fn tool_validate_mt5_config() -> Value {
+    json!({
+        "name": "validate_mt5_config",
+        "description": "Validate MT5 configuration files (terminal.ini, tester settings). Reports errors and warnings.",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}
+
+pub fn tool_get_wine_prefix_info() -> Value {
+    json!({
+        "name": "get_wine_prefix_info",
+        "description": "Get detailed Wine prefix information: Windows version, installed programs, registry files, drive_c size",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}
+
+pub fn tool_get_backtest_crash_info() -> Value {
+    json!({
+        "name": "get_backtest_crash_info",
+        "description": "Investigate backtest crashes/failures. Checks for incomplete markers, missing deals.csv, error logs. Can scan recent reports.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "report_dir": {
+                    "type": "string",
+                    "description": "Optional specific report directory to check"
+                },
+                "check_recent": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Also check recent reports for failures"
+                },
+                "hours_back": {
+                    "type": "integer",
+                    "default": 6,
+                    "description": "Hours back to check for recent failures"
+                }
+            }
+        }
+    })
+}

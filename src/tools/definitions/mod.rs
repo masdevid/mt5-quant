@@ -22,7 +22,7 @@ pub fn get_tools_list() -> Value {
         optimization::tool_get_optimization_status(),
         optimization::tool_get_optimization_results(),
         optimization::tool_list_jobs(),
-        // Analytics (9 tools)
+        // Analytics (19 tools)
         analytics::tool_analyze_report(),
         analytics::tool_analyze_monthly_pnl(),
         analytics::tool_analyze_drawdown_events(),
@@ -32,6 +32,17 @@ pub fn get_tools_list() -> Value {
         analytics::tool_analyze_direction_bias(),
         analytics::tool_analyze_streaks(),
         analytics::tool_analyze_concurrent_peak(),
+        // Deal query tools (10)
+        analytics::tool_list_deals(),
+        analytics::tool_search_deals_by_comment(),
+        analytics::tool_search_deals_by_magic(),
+        analytics::tool_analyze_profit_distribution(),
+        analytics::tool_analyze_time_performance(),
+        analytics::tool_analyze_hold_time_distribution(),
+        analytics::tool_analyze_layer_performance(),
+        analytics::tool_analyze_volume_vs_profit(),
+        analytics::tool_analyze_costs(),
+        analytics::tool_analyze_efficiency(),
         // Baseline
         baseline::tool_compare_baseline(),
         // Experts
@@ -58,6 +69,16 @@ pub fn get_tools_list() -> Value {
         utility::tool_check_mt5_status(),
         utility::tool_create_set_template(),
         utility::tool_export_report(),
+        // Debugging/Diagnostics (10 tools)
+        utility::tool_diagnose_wine(),
+        utility::tool_get_mt5_logs(),
+        utility::tool_search_mt5_errors(),
+        utility::tool_check_mt5_process(),
+        utility::tool_kill_mt5_process(),
+        utility::tool_check_system_resources(),
+        utility::tool_validate_mt5_config(),
+        utility::tool_get_wine_prefix_info(),
+        utility::tool_get_backtest_crash_info(),
         // Set Files
         setfiles::tool_read_set_file(),
         setfiles::tool_write_set_file(),
@@ -67,7 +88,7 @@ pub fn get_tools_list() -> Value {
         setfiles::tool_describe_sweep(),
         setfiles::tool_list_set_files(),
         setfiles::tool_set_from_optimization(),
-        // Reports (11 tools)
+        // Reports (19 tools)
         reports::tool_list_reports(),
         reports::tool_search_reports(),
         reports::tool_get_latest_report(),
@@ -78,6 +99,14 @@ pub fn get_tools_list() -> Value {
         reports::tool_get_history(),
         reports::tool_promote_to_baseline(),
         reports::tool_annotate_history(),
+        reports::tool_get_report_by_id(),
+        reports::tool_get_reports_summary(),
+        reports::tool_get_best_reports(),
+        reports::tool_search_reports_by_tags(),
+        reports::tool_search_reports_by_date_range(),
+        reports::tool_search_reports_by_notes(),
+        reports::tool_get_reports_by_set_file(),
+        reports::tool_get_comparable_reports(),
     ];
 
     serde_json::json!(tools)

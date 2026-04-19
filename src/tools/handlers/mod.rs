@@ -65,6 +65,17 @@ impl ToolHandler {
             "analyze_streaks" => analysis::handle_analyze_streaks(&self.config, args).await,
             "analyze_concurrent_peak" => analysis::handle_analyze_concurrent_peak(&self.config, args).await,
             "compare_baseline" => analysis::handle_compare_baseline(&self.config, args).await,
+            // Deal query handlers
+            "list_deals" => analysis::handle_list_deals(&self.config, args).await,
+            "search_deals_by_comment" => analysis::handle_search_deals_by_comment(&self.config, args).await,
+            "search_deals_by_magic" => analysis::handle_search_deals_by_magic(&self.config, args).await,
+            "analyze_profit_distribution" => analysis::handle_analyze_profit_distribution(&self.config, args).await,
+            "analyze_time_performance" => analysis::handle_analyze_time_performance(&self.config, args).await,
+            "analyze_hold_time_distribution" => analysis::handle_analyze_hold_time_distribution(&self.config, args).await,
+            "analyze_layer_performance" => analysis::handle_analyze_layer_performance(&self.config, args).await,
+            "analyze_volume_vs_profit" => analysis::handle_analyze_volume_vs_profit(&self.config, args).await,
+            "analyze_costs" => analysis::handle_analyze_costs(&self.config, args).await,
+            "analyze_efficiency" => analysis::handle_analyze_efficiency(&self.config, args).await,
             
             // Set file handlers
             "read_set_file" => setfiles::handle_read_set_file(args).await,
@@ -87,6 +98,14 @@ impl ToolHandler {
             "promote_to_baseline" => reports::handle_promote_to_baseline(&self.config, args).await,
             "get_history" => reports::handle_get_history(args).await,
             "annotate_history" => reports::handle_annotate_history(args).await,
+            "get_report_by_id" => reports::handle_get_report_by_id(&self.config, args).await,
+            "get_reports_summary" => reports::handle_get_reports_summary(args).await,
+            "get_best_reports" => reports::handle_get_best_reports(args).await,
+            "search_reports_by_tags" => reports::handle_search_reports_by_tags(args).await,
+            "search_reports_by_date_range" => reports::handle_search_reports_by_date_range(args).await,
+            "search_reports_by_notes" => reports::handle_search_reports_by_notes(args).await,
+            "get_reports_by_set_file" => reports::handle_get_reports_by_set_file(args).await,
+            "get_comparable_reports" => reports::handle_get_comparable_reports(args).await,
             
             // Utility handlers
             "check_symbol_data_status" => utility::handle_check_symbol_data_status(&self.config, args).await,
@@ -97,7 +116,17 @@ impl ToolHandler {
             "check_mt5_status" => utility::handle_check_mt5_status(&self.config).await,
             "create_set_template" => utility::handle_create_set_template(&self.config, args).await,
             "export_report" => utility::handle_export_report(&self.config, args).await,
-            
+            // Debugging/diagnostics handlers
+            "diagnose_wine" => utility::handle_diagnose_wine(&self.config, args).await,
+            "get_mt5_logs" => utility::handle_get_mt5_logs(&self.config, args).await,
+            "search_mt5_errors" => utility::handle_search_mt5_errors(&self.config, args).await,
+            "check_mt5_process" => utility::handle_check_mt5_process(&self.config, args).await,
+            "kill_mt5_process" => utility::handle_kill_mt5_process(&self.config, args).await,
+            "check_system_resources" => utility::handle_check_system_resources(&self.config, args).await,
+            "validate_mt5_config" => utility::handle_validate_mt5_config(&self.config, args).await,
+            "get_wine_prefix_info" => utility::handle_get_wine_prefix_info(&self.config, args).await,
+            "get_backtest_crash_info" => utility::handle_get_backtest_crash_info(&self.config, args).await,
+
             _ => Ok(json!({
                 "content": [{ "type": "text", "text": format!("Tool '{}' not implemented", name) }],
                 "isError": true

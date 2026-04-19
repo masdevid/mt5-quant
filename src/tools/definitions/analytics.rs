@@ -126,3 +126,155 @@ pub fn tool_analyze_concurrent_peak() -> Value {
         }
     })
 }
+
+pub fn tool_list_deals() -> Value {
+    json!({
+        "name": "list_deals",
+        "description": "List individual deals from a backtest report with optional filters",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string", "description": "Path to report directory containing deals.csv" },
+                "deal_type": { "type": "string", "enum": ["buy", "sell"], "description": "Filter by deal type" },
+                "min_profit": { "type": "number", "description": "Minimum profit (use negative for losses)" },
+                "max_profit": { "type": "number", "description": "Maximum profit" },
+                "start_date": { "type": "string", "description": "Start date filter (YYYY.MM.DD)" },
+                "end_date": { "type": "string", "description": "End date filter (YYYY.MM.DD)" },
+                "min_volume": { "type": "number", "description": "Minimum volume/lots" },
+                "max_volume": { "type": "number", "description": "Maximum volume/lots" },
+                "limit": { "type": "integer", "default": 100, "description": "Max deals to return" }
+            }
+        }
+    })
+}
+
+pub fn tool_search_deals_by_comment() -> Value {
+    json!({
+        "name": "search_deals_by_comment",
+        "description": "Search deals by comment text (case-insensitive partial match)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir", "query"],
+            "properties": {
+                "report_dir": { "type": "string" },
+                "query": { "type": "string", "description": "Search text in comments" },
+                "limit": { "type": "integer", "default": 50 }
+            }
+        }
+    })
+}
+
+pub fn tool_search_deals_by_magic() -> Value {
+    json!({
+        "name": "search_deals_by_magic",
+        "description": "Filter deals by magic number (EA identifier)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir", "magic"],
+            "properties": {
+                "report_dir": { "type": "string" },
+                "magic": { "type": "string", "description": "Magic number to filter by" },
+                "limit": { "type": "integer", "default": 100 }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_profit_distribution() -> Value {
+    json!({
+        "name": "analyze_profit_distribution",
+        "description": "Analyze profit distribution - small/medium/large wins and losses with detailed buckets",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_time_performance() -> Value {
+    json!({
+        "name": "analyze_time_performance",
+        "description": "Analyze performance by hour of day and day of week",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_hold_time_distribution() -> Value {
+    json!({
+        "name": "analyze_hold_time_distribution",
+        "description": "Analyze hold time distribution and correlation with profit",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_layer_performance() -> Value {
+    json!({
+        "name": "analyze_layer_performance",
+        "description": "Analyze performance by grid layer (extracted from deal comments)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_volume_vs_profit() -> Value {
+    json!({
+        "name": "analyze_volume_vs_profit",
+        "description": "Analyze correlation between volume and profit, plus performance by volume bucket",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_costs() -> Value {
+    json!({
+        "name": "analyze_costs",
+        "description": "Analyze commission and swap costs impact on profitability",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_analyze_efficiency() -> Value {
+    json!({
+        "name": "analyze_efficiency",
+        "description": "Calculate efficiency metrics: profit per hour/day, annualized return, trade frequency",
+        "inputSchema": {
+            "type": "object",
+            "required": ["report_dir"],
+            "properties": {
+                "report_dir": { "type": "string" }
+            }
+        }
+    })
+}

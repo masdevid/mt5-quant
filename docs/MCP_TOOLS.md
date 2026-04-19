@@ -2,13 +2,15 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** This file documents 49 of 57 total tools. Missing:
+> **Documentation Status:** This file documents 49 of 85 total tools. Missing:
 > - `list_experts`, `list_indicators`, `list_scripts`
 > - `healthcheck`, `list_symbols`
-> - `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`
+> - Reports query: `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`, `get_report_by_id`, `get_reports_summary`, `get_best_reports`, `search_reports_by_tags`, `search_reports_by_date_range`, `search_reports_by_notes`, `get_reports_by_set_file`, `get_comparable_reports`
 > - Granular analytics: `analyze_monthly_pnl`, `analyze_drawdown_events`, `analyze_top_losses`, `analyze_loss_sequences`, `analyze_position_pairs`, `analyze_direction_bias`, `analyze_streaks`, `analyze_concurrent_peak`
+> - Deal analytics: `list_deals`, `search_deals_by_comment`, `search_deals_by_magic`, `analyze_profit_distribution`, `analyze_time_performance`, `analyze_hold_time_distribution`, `analyze_layer_performance`, `analyze_volume_vs_profit`, `analyze_costs`, `analyze_efficiency`
 > - Archive/history tools: `archive_report`, `archive_all_reports`, `get_history`, `annotate_history`, `promote_to_baseline`
 > - Experts search: `search_experts`, `search_indicators`, `search_scripts`, `copy_indicator_to_project`, `copy_script_to_project`
+> - Debugging/diagnostics: `diagnose_wine`, `get_mt5_logs`, `search_mt5_errors`, `check_mt5_process`, `kill_mt5_process`, `check_system_resources`, `validate_mt5_config`, `get_wine_prefix_info`, `get_backtest_crash_info`
 
 ---
 

@@ -374,4 +374,543 @@ impl ReportDb {
 
         Ok(entry)
     }
+
+    /// Get a specific report by ID
+    pub fn get_by_id(&self, id: &str) -> Result<Option<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE id = ?"
+        )?;
+
+        let entry = stmt
+            .query_map([id], |row| {
+                let tags_json: String = row.get(23)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .next();
+
+        Ok(entry)
+    }
+
+    /// Search reports by tags (at least one tag must match)
+    pub fn search_by_tags(&self, tags: &[String], limit: usize) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE 1=1"
+            .to_string();
+
+        // Build OR conditions for tags - use JSON1 extension for tag matching
+        if !tags.is_empty() {
+            let tag_conditions: Vec<String> = tags.iter()
+                .map(|tag| format!("tags LIKE '%{}%'", tag.replace("'", "''")))
+                .collect();
+            sql.push_str(&format!(" AND ({})", tag_conditions.join(" OR ")));
+        }
+        sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let entries: Vec<ReportEntry> = stmt
+            .query_map([], |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Search reports by notes text (case-insensitive LIKE)
+    pub fn search_by_notes(&self, query: &str, limit: usize) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+        let pattern = format!("%{}%", query.replace("'", "''"));
+        let mut stmt = conn.prepare(
+            &format!("SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE notes LIKE '{}' ORDER BY created_at DESC LIMIT {}",
+            pattern, limit)
+        )?;
+
+        let entries: Vec<ReportEntry> = stmt
+            .query_map([], |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Find reports by set file (original or snapshot)
+    pub fn search_by_set_file(&self, set_file: &str, limit: usize) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+        let pattern = format!("%{}%", set_file.replace("'", "''"));
+        let mut stmt = conn.prepare(
+            &format!("SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE (set_file_original LIKE '{}' OR set_snapshot_path LIKE '{}') \
+            ORDER BY created_at DESC LIMIT {}",
+            pattern, pattern, limit)
+        )?;
+
+        let entries: Vec<ReportEntry> = stmt
+            .query_map([], |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Search by backtest date range (from_date and to_date fields)
+    pub fn search_by_date_range(
+        &self,
+        from_start: Option<&str>,
+        from_end: Option<&str>,
+        to_start: Option<&str>,
+        to_end: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE 1=1"
+            .to_string();
+
+        let mut params: Vec<String> = Vec::new();
+
+        if let Some(start) = from_start {
+            sql.push_str(" AND from_date >= ?");
+            params.push(start.to_string());
+        }
+        if let Some(end) = from_end {
+            sql.push_str(" AND from_date <= ?");
+            params.push(end.to_string());
+        }
+        if let Some(start) = to_start {
+            sql.push_str(" AND to_date >= ?");
+            params.push(start.to_string());
+        }
+        if let Some(end) = to_end {
+            sql.push_str(" AND to_date <= ?");
+            params.push(end.to_string());
+        }
+
+        sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let entries: Vec<ReportEntry> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Get comparable reports (same expert/symbol/timeframe for comparison)
+    pub fn get_comparable(
+        &self,
+        expert: &str,
+        symbol: &str,
+        timeframe: &str,
+        exclude_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE expert = ? AND symbol = ? AND timeframe = ?"
+            .to_string();
+
+        let mut params: Vec<String> = vec![
+            expert.to_string(),
+            symbol.to_string(),
+            timeframe.to_string(),
+        ];
+
+        if let Some(id) = exclude_id {
+            sql.push_str(" AND id != ?");
+            params.push(id.to_string());
+        }
+
+        sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let entries: Vec<ReportEntry> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Get reports sorted by a specific metric (for best/worst queries)
+    pub fn get_sorted_by(
+        &self,
+        sort_column: &str,
+        ascending: bool,
+        limit: usize,
+        filters: &ReportFilters,
+    ) -> Result<Vec<ReportEntry>> {
+        let conn = self.connect()?;
+
+        // Validate sort column to prevent SQL injection
+        let valid_columns = ["net_profit", "profit_factor", "max_dd_pct", "win_rate_pct",
+                            "sharpe_ratio", "recovery_factor", "total_trades", "created_at"];
+        if !valid_columns.contains(&sort_column) {
+            return Err(anyhow::anyhow!("Invalid sort column: {}", sort_column));
+        }
+
+        let mut sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE 1=1"
+            .to_string();
+
+        let mut filter_params: Vec<String> = Vec::new();
+
+        if let Some(ea) = &filters.expert {
+            sql.push_str(" AND expert LIKE ?");
+            filter_params.push(format!("%{}%", ea));
+        }
+        if let Some(sym) = &filters.symbol {
+            sql.push_str(" AND symbol = ?");
+            filter_params.push(sym.clone());
+        }
+        if let Some(tf) = &filters.timeframe {
+            sql.push_str(" AND timeframe = ?");
+            filter_params.push(tf.clone());
+        }
+        if let Some(verdict) = &filters.verdict {
+            sql.push_str(" AND verdict = ?");
+            filter_params.push(verdict.clone());
+        }
+
+        // For non-created_at columns, only include rows where that column is not NULL
+        if sort_column != "created_at" {
+            sql.push_str(&format!(" AND {} IS NOT NULL", sort_column));
+        }
+
+        let order = if ascending { "ASC" } else { "DESC" };
+        sql.push_str(&format!(" ORDER BY {} {} LIMIT {}", sort_column, order, limit));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let entries: Vec<ReportEntry> = stmt
+            .query_map(rusqlite::params_from_iter(filter_params.iter()), |row| {
+                let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
+                let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(entries)
+    }
+
+    /// Get aggregate statistics for reports
+    pub fn get_stats(&self, filters: &ReportFilters) -> Result<ReportStats> {
+        let conn = self.connect()?;
+
+        let mut sql = "SELECT \
+            COUNT(*), \
+            AVG(net_profit), \
+            AVG(profit_factor), \
+            AVG(max_dd_pct), \
+            AVG(win_rate_pct), \
+            AVG(sharpe_ratio), \
+            SUM(CASE WHEN net_profit > 0 THEN 1 ELSE 0 END), \
+            SUM(CASE WHEN verdict = 'pass' THEN 1 ELSE 0 END), \
+            SUM(CASE WHEN verdict = 'fail' THEN 1 ELSE 0 END), \
+            SUM(CASE WHEN verdict = 'marginal' THEN 1 ELSE 0 END) \
+            FROM reports WHERE 1=1"
+            .to_string();
+
+        let mut filter_params: Vec<String> = Vec::new();
+
+        if let Some(ea) = &filters.expert {
+            sql.push_str(" AND expert LIKE ?");
+            filter_params.push(format!("%{}%", ea));
+        }
+        if let Some(sym) = &filters.symbol {
+            sql.push_str(" AND symbol = ?");
+            filter_params.push(sym.clone());
+        }
+        if let Some(tf) = &filters.timeframe {
+            sql.push_str(" AND timeframe = ?");
+            filter_params.push(tf.clone());
+        }
+        if let Some(verdict) = &filters.verdict {
+            sql.push_str(" AND verdict = ?");
+            filter_params.push(verdict.clone());
+        }
+
+        let stats: ReportStats = conn.query_row(
+            &sql,
+            rusqlite::params_from_iter(filter_params.iter()),
+            |row| {
+                let total: i64 = row.get(0)?;
+                let profitable: Option<i64> = row.get(6)?;
+                let pass_count: Option<i64> = row.get(7)?;
+                let fail_count: Option<i64> = row.get(8)?;
+                let marginal_count: Option<i64> = row.get(9)?;
+
+                Ok(ReportStats {
+                    total_count: total as usize,
+                    avg_net_profit: row.get(1)?,
+                    avg_profit_factor: row.get(2)?,
+                    avg_max_dd_pct: row.get(3)?,
+                    avg_win_rate_pct: row.get(4)?,
+                    avg_sharpe_ratio: row.get(5)?,
+                    profitable_count: profitable.unwrap_or(0) as usize,
+                    pass_verdict_count: pass_count.unwrap_or(0) as usize,
+                    fail_verdict_count: fail_count.unwrap_or(0) as usize,
+                    marginal_verdict_count: marginal_count.unwrap_or(0) as usize,
+                })
+            },
+        )?;
+
+        Ok(stats)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ReportStats {
+    pub total_count: usize,
+    pub avg_net_profit: Option<f64>,
+    pub avg_profit_factor: Option<f64>,
+    pub avg_max_dd_pct: Option<f64>,
+    pub avg_win_rate_pct: Option<f64>,
+    pub avg_sharpe_ratio: Option<f64>,
+    pub profitable_count: usize,
+    pub pass_verdict_count: usize,
+    pub fail_verdict_count: usize,
+    pub marginal_verdict_count: usize,
 }

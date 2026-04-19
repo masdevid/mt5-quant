@@ -148,3 +148,133 @@ pub fn tool_prune_reports() -> Value {
         }
     })
 }
+
+pub fn tool_get_report_by_id() -> Value {
+    json!({
+        "name": "get_report_by_id",
+        "description": "Get a specific report by its ID with full details and optional equity chart",
+        "inputSchema": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": { "type": "string", "description": "Report ID (from list_reports or search_reports)" },
+                "include_chart": { "type": "boolean", "description": "Include equity chart as base64 PNG (default: true)", "default": true }
+            }
+        }
+    })
+}
+
+pub fn tool_get_reports_summary() -> Value {
+    json!({
+        "name": "get_reports_summary",
+        "description": "Get aggregate statistics across reports - counts, averages by EA/symbol/timeframe/verdict",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "expert": { "type": "string", "description": "Filter by EA name substring" },
+                "symbol": { "type": "string", "description": "Filter by exact symbol" },
+                "timeframe": { "type": "string", "description": "Filter by exact timeframe" },
+                "verdict": { "type": "string", "description": "Filter by verdict (pass/fail/marginal)" }
+            }
+        }
+    })
+}
+
+pub fn tool_get_best_reports() -> Value {
+    json!({
+        "name": "get_best_reports",
+        "description": "Get top N reports sorted by performance metric (profit factor, win rate, drawdown, etc.)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sort_by": { "type": "string", "enum": ["net_profit", "profit_factor", "max_dd_pct", "win_rate_pct", "sharpe_ratio", "recovery_factor", "total_trades"], "default": "profit_factor", "description": "Metric to sort by" },
+                "order": { "type": "string", "enum": ["asc", "desc"], "default": "desc", "description": "Sort order (use 'asc' for drawdown, 'desc' for profit)" },
+                "limit": { "type": "integer", "default": 10, "description": "Number of reports to return" },
+                "expert": { "type": "string", "description": "Filter by EA name substring" },
+                "symbol": { "type": "string", "description": "Filter by exact symbol" },
+                "timeframe": { "type": "string", "description": "Filter by exact timeframe" },
+                "verdict": { "type": "string", "description": "Filter by verdict" }
+            }
+        }
+    })
+}
+
+pub fn tool_search_reports_by_tags() -> Value {
+    json!({
+        "name": "search_reports_by_tags",
+        "description": "Search reports by tags - at least one tag must match (OR logic)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["tags"],
+            "properties": {
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags to search for (e.g., ['production', 'verified'])" },
+                "limit": { "type": "integer", "default": 50 }
+            }
+        }
+    })
+}
+
+pub fn tool_search_reports_by_date_range() -> Value {
+    json!({
+        "name": "search_reports_by_date_range",
+        "description": "Search reports by backtest date range (from_date and to_date fields)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "from_start": { "type": "string", "description": "From date >= this (YYYY.MM.DD)" },
+                "from_end": { "type": "string", "description": "From date <= this (YYYY.MM.DD)" },
+                "to_start": { "type": "string", "description": "To date >= this (YYYY.MM.DD)" },
+                "to_end": { "type": "string", "description": "To date <= this (YYYY.MM.DD)" },
+                "limit": { "type": "integer", "default": 50 }
+            }
+        }
+    })
+}
+
+pub fn tool_search_reports_by_notes() -> Value {
+    json!({
+        "name": "search_reports_by_notes",
+        "description": "Full-text search in report notes field (case-insensitive LIKE search)",
+        "inputSchema": {
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": { "type": "string", "description": "Search text (partial match)" },
+                "limit": { "type": "integer", "default": 50 }
+            }
+        }
+    })
+}
+
+pub fn tool_get_reports_by_set_file() -> Value {
+    json!({
+        "name": "get_reports_by_set_file",
+        "description": "Find all reports that used a specific .set parameter file",
+        "inputSchema": {
+            "type": "object",
+            "required": ["set_file"],
+            "properties": {
+                "set_file": { "type": "string", "description": "Set filename or partial path to match" },
+                "limit": { "type": "integer", "default": 50 }
+            }
+        }
+    })
+}
+
+pub fn tool_get_comparable_reports() -> Value {
+    json!({
+        "name": "get_comparable_reports",
+        "description": "Find reports comparable to a given report (same EA, symbol, timeframe) - useful for before/after analysis",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "report_id": { "type": "string", "description": "Reference report ID (if provided, uses its expert/symbol/timeframe)" },
+                "expert": { "type": "string", "description": "EA name (required if report_id not provided)" },
+                "symbol": { "type": "string", "description": "Symbol (required if report_id not provided)" },
+                "timeframe": { "type": "string", "description": "Timeframe (required if report_id not provided)" },
+                "exclude_id": { "type": "string", "description": "Exclude this report ID from results" },
+                "limit": { "type": "integer", "default": 20 }
+            }
+        }
+    })
+}

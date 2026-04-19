@@ -1,6 +1,6 @@
 # MT5-Quant
 
-**MCP server for MT5 strategy development on macOS/Linux.** 57 tools to compile, backtest, analyze, optimize, and manage MQL5 Expert Advisors — no Windows required.
+**MCP server for MT5 strategy development on macOS/Linux.** 85 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
 
 ```
 You: "Backtest MyEA Jan-Mar, what caused the February drawdown?"
@@ -20,6 +20,7 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 | MQL5 compilation | ✅ | ❌ | ❌ |
 | macOS/Linux native | ✅ | Windows only | Cloud |
 | Optimization | ✅ Background | ❌ | ✅ Paid |
+| Crash debugging | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
 
 ## Quick Install
 
@@ -61,12 +62,12 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [VSCODE.md](docs/VSCODE.md) | VS Code setup |
 | [ANTIGRAVITY.md](docs/ANTIGRAVITY.md) | Antigravity IDE setup |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
-| [TOOLS.md](docs/MCP_TOOLS.md) | All 57 tools documented |
+| [TOOLS.md](docs/MCP_TOOLS.md) | All 75 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
 | [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |
 
-## MCP Tools (57)
+## MCP Tools (75)
 
 ### Core workflow
 
@@ -98,6 +99,21 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 
 Use these for targeted analysis, or `analyze_report` to run all at once.
 
+### Deal-Level Analytics (New)
+
+| Tool | Description |
+|------|-------------|
+| `list_deals` | List individual deals with filters (type, profit range, volume, dates) |
+| `search_deals_by_comment` | Full-text search in deal comments (e.g., "Layer #3") |
+| `search_deals_by_magic` | Filter deals by EA magic number |
+| `analyze_profit_distribution` | Profit histogram: small/medium/large wins and losses |
+| `analyze_time_performance` | Performance by hour of day and day of week |
+| `analyze_hold_time_distribution` | Hold time buckets + correlation with profit |
+| `analyze_layer_performance` | Grid/martingale layer analysis from comments |
+| `analyze_volume_vs_profit` | Volume correlation + performance by lot size |
+| `analyze_costs` | Commission and swap impact on profitability |
+| `analyze_efficiency` | Profit per hour/day, annualized return, trade frequency |
+
 ### Monitoring
 
 | Tool | Description |
@@ -114,6 +130,14 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `list_reports` | Compact table of all runs with key metrics — no full analysis needed |
 | `get_latest_report` | Get most recent report with optional equity chart |
 | `search_reports` | Find reports by EA, symbol, date range, or profit criteria |
+| `get_report_by_id` | Get specific report by ID with equity chart |
+| `get_reports_summary` | Aggregate stats: counts, averages, pass rates |
+| `get_best_reports` | Top N reports sorted by any metric (profit factor, drawdown, etc.) |
+| `search_reports_by_tags` | Find reports by tags |
+| `search_reports_by_date_range` | Query by backtest date range |
+| `search_reports_by_notes` | Full-text search in report notes |
+| `get_reports_by_set_file` | Find all reports using a specific .set file |
+| `get_comparable_reports` | Find comparable reports (same EA/symbol/timeframe) |
 | `tail_log` | Read last N lines of any log; `filter=errors` to see only failures |
 | `prune_reports` | Delete old report directories, keep last N (skips `_opt` dirs) |
 
@@ -142,6 +166,20 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `check_symbol_data_status` | Validate symbol has sufficient history data for date range |
 | `check_mt5_status` | Check if MT5 terminal is installed and ready |
 | `validate_ea_syntax` | Pre-compile syntax check without running full compilation |
+
+### Debugging & Diagnostics (New)
+
+| Tool | Description |
+|------|-------------|
+| `diagnose_wine` | Check Wine installation, version, and prefix health |
+| `get_mt5_logs` | Get MT5 terminal, tester, or MetaEditor logs with filtering |
+| `search_mt5_errors` | Search logs for error patterns (crash, exception, access violation) |
+| `check_mt5_process` | Check if MT5 processes are running, get PID, CPU, memory usage |
+| `kill_mt5_process` | Kill stuck MT5 processes (force=true for wineserver) |
+| `check_system_resources` | Check disk space, memory, CPU availability |
+| `validate_mt5_config` | Validate terminal.ini and tester configuration files |
+| `get_wine_prefix_info` | Get Wine prefix details: Windows version, installed programs, registry |
+| `get_backtest_crash_info` | Investigate backtest failures: incomplete markers, missing deals.csv, errors |
 
 ### Project Management
 
@@ -191,6 +229,12 @@ Full schema: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)
 ## Troubleshooting
 
 Run `verify_setup` from Claude first — it checks all paths and returns actionable hints.
+
+For crashes or unexplained failures during backtest/compile/optimization:
+- `diagnose_wine` — Check Wine installation and prefix health
+- `search_mt5_errors` — Find crash causes in logs
+- `check_mt5_process` + `kill_mt5_process` — Detect and kill stuck processes
+- `get_backtest_crash_info` — Investigate failed backtest reports
 
 **[Full Troubleshooting Guide →](docs/TROUBLESHOOTING.md)**
 
