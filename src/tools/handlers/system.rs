@@ -60,17 +60,78 @@ pub async fn handle_verify_setup(config: &Config) -> Result<Value> {
 }
 
 pub async fn handle_list_symbols(config: &Config) -> Result<Value> {
-    let symbols = config.discover_symbols();
+    // Get active account info
+    let current_account = config.current_account();
+    let active_server = current_account.as_ref().map(|a| a.server.clone());
+    
+    // Get all available servers for reference
+    let all_servers = config.available_servers();
+    
+    // Get symbols for active server (or all if no active account)
+    let symbols = config.discover_symbols_for_active_account();
+    
+    let hint = if symbols.is_empty() {
+        if active_server.is_some() {
+            "No history data found for the active account's server. Open MT5 and download tick data for the symbols you want to backtest."
+        } else {
+            "No history data found. Open MT5 and download tick data for the symbols you want to backtest."
+        }
+    } else {
+        "These symbols have local tick history and can be used for backtesting."
+    };
+    
     Ok(json!({
         "content": [{ "type": "text", "text": json!({
             "success": true,
             "count": symbols.len(),
             "symbols": symbols,
-            "hint": if symbols.is_empty() {
-                "No history data found. Open MT5 and download tick data for the symbols you want to backtest."
-            } else {
-                "These symbols have local tick history and can be used for backtesting."
-            }
+            "active_account": current_account.map(|a| json!({
+                "login": a.login,
+                "server": a.server
+            })),
+            "active_server": active_server,
+            "available_servers": all_servers,
+            "hint": hint,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+/// Get active MT5 account info with available symbols for pre-flight checks
+pub async fn handle_get_active_account(config: &Config) -> Result<Value> {
+    let current_account = config.current_account();
+    let active_server = current_account.as_ref().map(|a| a.server.clone());
+    
+    // Get all available servers
+    let all_servers = config.available_servers();
+    
+    // Get symbols for active server (or all if no active account)
+    let symbols = config.discover_symbols_for_active_account();
+    
+    // Determine readiness for backtesting
+    let ready_for_backtest = current_account.is_some() && !symbols.is_empty();
+    
+    let hint = if current_account.is_none() {
+        "No active MT5 account detected. Open MT5 and login to an account first."
+    } else if symbols.is_empty() {
+        "Active account found but no symbol history data. Download tick data in MT5 Strategy Tester."
+    } else {
+        "Ready for backtesting. Use these symbols with run_backtest."
+    };
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "ready_for_backtest": ready_for_backtest,
+            "account": current_account.map(|a| json!({
+                "login": a.login,
+                "server": a.server
+            })),
+            "server": active_server,
+            "available_servers": all_servers,
+            "symbols": symbols,
+            "symbol_count": symbols.len(),
+            "hint": hint,
         }).to_string() }],
         "isError": false
     }))

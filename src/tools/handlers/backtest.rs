@@ -5,42 +5,144 @@ use std::path::Path;
 use crate::models::Config;
 use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 
+/// Pre-flight check result for backtest readiness
+#[derive(Debug)]
+struct BacktestPreflight {
+    account: Option<crate::models::CurrentAccount>,
+    available_symbols: Vec<String>,
+    ea_exists: bool,
+    server: Option<String>,
+}
+
+impl BacktestPreflight {
+    fn check(config: &Config, expert: &str) -> Self {
+        let account = config.current_account();
+        let server = account.as_ref().map(|a| a.server.clone());
+        let available_symbols = config.discover_symbols_for_active_account();
+        
+        let ea_exists = if let Some(experts_dir) = &config.experts_dir {
+            let mq5_path = std::path::Path::new(experts_dir).join(format!("{}.mq5", expert));
+            let ex5_path = std::path::Path::new(experts_dir).join(format!("{}.ex5", expert));
+            let subdir_mq5 = std::path::Path::new(experts_dir).join(expert).join(format!("{}.mq5", expert));
+            mq5_path.exists() || ex5_path.exists() || subdir_mq5.exists()
+        } else {
+            false
+        };
+        
+        Self {
+            account,
+            available_symbols,
+            ea_exists,
+            server,
+        }
+    }
+    
+    fn is_ready(&self) -> bool {
+        self.account.is_some() && !self.available_symbols.is_empty() && self.ea_exists
+    }
+}
+
 pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value> {
     let expert = args.get("expert")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
-    // Symbol pre-flight
+    // Run pre-flight check
+    let preflight = BacktestPreflight::check(config, expert);
+    
+    // Get active account context for error messages
+    let active_server = preflight.server.as_deref().unwrap_or("unknown");
+    let active_login = preflight.account.as_ref().map(|a| a.login.as_str()).unwrap_or("unknown");
+    
+    // Check account session first
+    if preflight.account.is_none() {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "error": "No active MT5 account session detected.",
+                "hint": "Open MT5 and login to your trading account before running backtests.",
+                "pre_check": "account_missing"
+            }).to_string() }],
+            "isError": true
+        }));
+    }
+    
+    // Symbol pre-flight with account context
     let requested_symbol = args.get("symbol")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let available = config.discover_symbols();
-
     let symbol = if requested_symbol.is_empty() {
-        let default = config.backtest_symbol.clone()
-            .unwrap_or_else(|| "XAUUSD".to_string());
-        if available.contains(&default) {
-            default
-        } else if let Some(first) = available.first() {
-            tracing::warn!("Default symbol {} not found; using {}", default, first);
+        // Use config default or first available symbol
+        if let Some(default) = config.backtest_symbol.clone() {
+            if preflight.available_symbols.contains(&default) {
+                default
+            } else if let Some(first) = preflight.available_symbols.first() {
+                tracing::warn!("Default symbol {} not found for server {}; using {}", default, active_server, first);
+                first.clone()
+            } else {
+                return Ok(json!({
+                    "content": [{ "type": "text", "text": json!({
+                        "error": format!("No symbols available for backtesting on server '{}'.", active_server),
+                        "account": {
+                            "login": active_login,
+                            "server": active_server
+                        },
+                        "hint": "Download historical data in MT5 Strategy Tester for this server.",
+                        "pre_check": "no_symbols",
+                        "suggestion": "Use get_active_account to see available symbols."
+                    }).to_string() }],
+                    "isError": true
+                }));
+            }
+        } else if let Some(first) = preflight.available_symbols.first() {
             first.clone()
         } else {
-            default
-        }
-    } else {
-        if !available.is_empty() && !available.contains(&requested_symbol.to_string()) {
             return Ok(json!({
                 "content": [{ "type": "text", "text": json!({
-                    "error": format!("Symbol '{}' has no local history data.", requested_symbol),
-                    "available_symbols": available,
-                    "hint": "Use list_symbols to see all available symbols."
+                    "error": format!("No symbols available for backtesting on server '{}'.", active_server),
+                    "account": {
+                        "login": active_login,
+                        "server": active_server
+                    },
+                    "hint": "Download historical data in MT5 Strategy Tester for this server.",
+                    "pre_check": "no_symbols",
+                    "suggestion": "Use get_active_account to see available symbols."
+                }).to_string() }],
+                "isError": true
+            }));
+        }
+    } else {
+        if !preflight.available_symbols.is_empty() && !preflight.available_symbols.contains(&requested_symbol.to_string()) {
+            return Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "error": format!("Symbol '{}' is not available for server '{}'.", requested_symbol, active_server),
+                    "account": {
+                        "login": active_login,
+                        "server": active_server
+                    },
+                    "requested_symbol": requested_symbol,
+                    "available_symbols": preflight.available_symbols,
+                    "hint": "The symbol may not have history data for this account's server. Use list_symbols to see available symbols.",
+                    "pre_check": "symbol_not_available",
+                    "suggestion": "Either switch to a different MT5 account with this symbol's data, or download history for this symbol on the current server."
                 }).to_string() }],
                 "isError": true
             }));
         }
         requested_symbol.to_string()
     };
+    
+    // EA existence check with context
+    if !preflight.ea_exists {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "error": format!("EA '{}' not found in Experts directory.", expert),
+                "hint": "Use search_experts or list_experts to find available EAs.",
+                "pre_check": "ea_not_found"
+            }).to_string() }],
+            "isError": true
+        }));
+    }
 
     // Date defaulting: past complete calendar month
     let (from_date, to_date) = {

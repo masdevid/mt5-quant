@@ -11,6 +11,7 @@ mod optimization;
 mod analysis;
 mod setfiles;
 mod reports;
+mod utility;
 
 #[derive(Debug)]
 pub struct ToolHandler {
@@ -28,12 +29,18 @@ impl ToolHandler {
             "verify_setup" => system::handle_verify_setup(&self.config).await,
             "list_symbols" => system::handle_list_symbols(&self.config).await,
             "healthcheck" => system::handle_healthcheck(&self.config, args).await,
+            "get_active_account" => system::handle_get_active_account(&self.config).await,
             
             // Expert/Indicator/Script handlers
             "list_experts" => experts::handle_list_experts(&self.config, args).await,
             "list_indicators" => experts::handle_list_indicators(&self.config, args).await,
             "list_scripts" => experts::handle_list_scripts(&self.config, args).await,
             "compile_ea" => experts::handle_compile_ea(&self.config, args).await,
+            "search_experts" => experts::handle_search_experts(&self.config, args).await,
+            "search_indicators" => experts::handle_search_indicators(&self.config, args).await,
+            "search_scripts" => experts::handle_search_scripts(&self.config, args).await,
+            "copy_indicator_to_project" => experts::handle_copy_indicator_to_project(&self.config, args).await,
+            "copy_script_to_project" => experts::handle_copy_script_to_project(&self.config, args).await,
             
             // Backtest handlers
             "run_backtest" => backtest::handle_run_backtest(&self.config, args).await,
@@ -80,6 +87,16 @@ impl ToolHandler {
             "promote_to_baseline" => reports::handle_promote_to_baseline(&self.config, args).await,
             "get_history" => reports::handle_get_history(args).await,
             "annotate_history" => reports::handle_annotate_history(args).await,
+            
+            // Utility handlers
+            "check_symbol_data_status" => utility::handle_check_symbol_data_status(&self.config, args).await,
+            "get_backtest_history" => utility::handle_get_backtest_history(&self.config, args).await,
+            "compare_backtests" => utility::handle_compare_backtests(&self.config, args).await,
+            "init_project" => utility::handle_init_project(&self.config, args).await,
+            "validate_ea_syntax" => utility::handle_validate_ea_syntax(&self.config, args).await,
+            "check_mt5_status" => utility::handle_check_mt5_status(&self.config).await,
+            "create_set_template" => utility::handle_create_set_template(&self.config, args).await,
+            "export_report" => utility::handle_export_report(&self.config, args).await,
             
             _ => Ok(json!({
                 "content": [{ "type": "text", "text": format!("Tool '{}' not implemented", name) }],

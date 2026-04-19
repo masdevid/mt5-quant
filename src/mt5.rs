@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use tokio::process::Command as AsyncCommand;
 
-use crate::config::Config;
+use crate::models::Config;
 
 #[derive(Debug)]
 pub struct Mt5Manager {
@@ -35,7 +35,7 @@ impl Mt5Manager {
         let mut all_ok = true;
 
         // Check config file
-        let config_path = Config::get_config_path();
+        let config_path = Config::writable_config_path();
         if config_path.exists() {
             checks.insert("config_file".to_string(), json!({
                 "ok": true,

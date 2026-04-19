@@ -2,7 +2,79 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+/// Active MT5 account session info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrentAccount {
+    pub login: String,
+    pub server: String,
+}
+
+impl CurrentAccount {
+    /// Parse common.ini to extract active account info
+    /// Handles UTF-16LE encoding which MT5 uses on Windows/Wine
+    pub fn from_common_ini(terminal_dir: &Path) -> Option<Self> {
+        let common_ini = terminal_dir.join("config").join("common.ini");
+        if !common_ini.exists() {
+            return None;
+        }
+
+        // Try reading as UTF-16LE first (MT5 default encoding)
+        let bytes = fs::read(&common_ini).ok()?;
+        let content = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+            // UTF-16LE BOM detected
+            let start = if bytes.len() >= 2 { 2 } else { 0 };
+            let u16_slice: Vec<u16> = bytes[start..]
+                .chunks(2)
+                .map(|chunk| {
+                    if chunk.len() == 2 {
+                        u16::from_le_bytes([chunk[0], chunk[1]])
+                    } else {
+                        chunk[0] as u16
+                    }
+                })
+                .collect();
+            String::from_utf16(&u16_slice).ok()?
+        } else {
+            // Try UTF-8 fallback
+            String::from_utf8(bytes).ok()? 
+        };
+
+        let mut login = None;
+        let mut server = None;
+
+        for line in content.lines() {
+            // Remove null bytes and control characters but keep printable ASCII and valid Unicode
+            let cleaned: String = line.chars()
+                .filter(|c| *c != '\0' && !c.is_control())
+                .collect();
+            
+            let trimmed = cleaned.trim();
+            if trimmed.starts_with("Login=") {
+                let val = trimmed.strip_prefix("Login=").map(|s| s.trim().to_string());
+                if let Some(v) = val {
+                    if !v.is_empty() {
+                        login = Some(v);
+                    }
+                }
+            } else if trimmed.starts_with("Server=") {
+                let val = trimmed.strip_prefix("Server=").map(|s| s.trim().to_string());
+                if let Some(v) = val {
+                    if !v.is_empty() {
+                        server = Some(v);
+                    }
+                }
+            }
+        }
+
+        match (login, server) {
+            (Some(l), Some(s)) => Some(Self { login: l, server: s }),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -73,13 +145,52 @@ impl Config {
         Ok(discovered)
     }
 
-    /// The canonical writable config location: $MT5_MCP_HOME/config/mt5-quant.yaml
-    /// or ~/.config/mt5-quant/config/mt5-quant.yaml.
+    /// The canonical writable config location, checked in order:
+    /// 1. $MT5_MCP_HOME/config/mt5-quant.yaml (user override)
+    /// 2. Config next to binary (for portable/development installs)
+    /// 3. ~/.config/mt5-quant/config/mt5-quant.yaml (standard location)
+    /// 4. Development fallback (project directory)
     pub fn writable_config_path() -> PathBuf {
+        // 1. Check env override first
         if let Ok(home) = std::env::var("MT5_MCP_HOME") {
             return Path::new(&home).join("config").join("mt5-quant.yaml");
         }
-        Self::installation_dir().join("config").join("mt5-quant.yaml")
+
+        // 2. Check if config exists next to the binary
+        if let Some(binary_dir) = Self::binary_dir() {
+            let local_config = binary_dir.join("config").join("mt5-quant.yaml");
+            if local_config.exists() {
+                return local_config;
+            }
+
+            // If binary is in a non-standard path (not system bin), use it
+            let binary_str = binary_dir.to_string_lossy();
+            if !binary_str.starts_with("/usr/local/bin")
+                && !binary_str.starts_with("/usr/bin")
+                && !binary_str.starts_with("/bin")
+            {
+                return binary_dir.join("config").join("mt5-quant.yaml");
+            }
+        }
+
+        // 3. Check standard location
+        let standard_config = Self::standard_config_dir().join("config").join("mt5-quant.yaml");
+        if standard_config.exists() {
+            return standard_config;
+        }
+
+        // 4. Development fallback - use project directory
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dev_config = manifest_dir.parent()
+            .unwrap_or(manifest_dir)
+            .join("config")
+            .join("mt5-quant.yaml");
+        if dev_config.exists() {
+            return dev_config;
+        }
+
+        // 5. Fall back to standard location (will be created if not exists)
+        Self::standard_config_dir().join("config").join("mt5-quant.yaml")
     }
 
     // ── Auto-discovery ────────────────────────────────────────────────────────
@@ -210,6 +321,8 @@ impl Config {
              wine_executable: {wine}\n\
              terminal_dir: {term}\n\
              experts_dir: {exp}\n\
+             indicators_dir: {ind}\n\
+             scripts_dir: {scr}\n\
              tester_profiles_dir: {prof}\n\
              tester_cache_dir: {cache}\n\
              display_mode: {disp}\n\
@@ -227,6 +340,8 @@ impl Config {
             wine      = s(&self.wine_executable),
             term      = s(&self.terminal_dir),
             exp       = s(&self.experts_dir),
+            ind       = s(&self.indicators_dir),
+            scr       = s(&self.scripts_dir),
             prof      = s(&self.tester_profiles_dir),
             cache     = s(&self.tester_cache_dir),
             disp      = s(&self.display_mode),
@@ -321,11 +436,40 @@ impl Config {
         }
     }
 
-    /// Root of the MCP installation: $MT5_MCP_HOME or ~/.config/mt5-quant
+    /// Root of the MCP installation.
+    /// Priority: $MT5_MCP_HOME > binary parent dir > ~/.config/mt5-quant
     pub fn installation_dir() -> PathBuf {
+        // 1. Check env override first
         if let Ok(home) = std::env::var("MT5_MCP_HOME") {
             return Path::new(&home).to_path_buf();
         }
+
+        // 2. Check if binary is in a non-standard location (development/portable)
+        // with an existing config file
+        if let Some(binary_dir) = Self::binary_dir() {
+            let binary_str = binary_dir.to_string_lossy();
+            let is_system_path = binary_str.starts_with("/usr/local/bin")
+                || binary_str.starts_with("/usr/bin")
+                || binary_str.starts_with("/bin");
+
+            if !is_system_path && binary_dir.join("config").join("mt5-quant.yaml").exists() {
+                return binary_dir;
+            }
+        }
+
+        // 3. Fall back to standard location
+        Self::standard_config_dir()
+    }
+
+    /// Get the directory where the current binary is located
+    fn binary_dir() -> Option<PathBuf> {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+    }
+
+    /// Standard config directory in user's home
+    fn standard_config_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| Path::new(".").to_path_buf())
             .join(".config")
@@ -363,7 +507,8 @@ impl Config {
 
     /// Scan Bases/*/history/ for symbol directories that contain at least one .hcc file.
     /// Returns deduplicated, sorted list of symbol names available for backtesting.
-    pub fn discover_symbols(&self) -> Vec<String> {
+    /// If server_filter is provided, only scans that specific server's directory.
+    pub fn discover_symbols(&self, server_filter: Option<&str>) -> Vec<String> {
         let mt5_dir = match self.mt5_dir() {
             Some(d) => d,
             None => return Vec::new(),
@@ -379,6 +524,19 @@ impl Config {
         // Bases/{server}/history/{symbol}/{year}.hcc
         if let Ok(servers) = fs::read_dir(&bases_dir) {
             for server in servers.filter_map(|e| e.ok()) {
+                let server_name_os = server.file_name();
+                let server_name = server_name_os.to_str().unwrap_or("");
+                
+                // Skip non-directory entries and filter by server if specified
+                if server_name.is_empty() {
+                    continue;
+                }
+                if let Some(filter) = server_filter {
+                    if server_name != filter {
+                        continue;
+                    }
+                }
+                
                 let history_dir = server.path().join("history");
                 if !history_dir.is_dir() {
                     continue;
@@ -415,5 +573,45 @@ impl Config {
         let mut sorted: Vec<String> = symbols.into_iter().collect();
         sorted.sort();
         sorted
+    }
+
+    /// Get the currently active MT5 account from common.ini
+    pub fn current_account(&self) -> Option<CurrentAccount> {
+        self.mt5_dir().and_then(|d| CurrentAccount::from_common_ini(&d))
+    }
+
+    /// Discover symbols for the currently active account/server only
+    pub fn discover_symbols_for_active_account(&self) -> Vec<String> {
+        match self.current_account() {
+            Some(account) => self.discover_symbols(Some(&account.server)),
+            None => self.discover_symbols(None),
+        }
+    }
+
+    /// Get all available servers that have symbol data
+    pub fn available_servers(&self) -> Vec<String> {
+        let mt5_dir = match self.mt5_dir() {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+
+        let bases_dir = mt5_dir.join("Bases");
+        if !bases_dir.is_dir() {
+            return Vec::new();
+        }
+
+        let mut servers = Vec::new();
+        if let Ok(entries) = fs::read_dir(&bases_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        servers.push(name.to_string());
+                    }
+                }
+            }
+        }
+        servers.sort();
+        servers
     }
 }

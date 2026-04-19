@@ -8,6 +8,7 @@ pub mod optimization;
 pub mod reports;
 pub mod setfiles;
 pub mod system;
+pub mod utility;
 
 pub fn get_tools_list() -> Value {
     let tools = vec![
@@ -38,10 +39,25 @@ pub fn get_tools_list() -> Value {
         experts::tool_list_experts(),
         experts::tool_list_indicators(),
         experts::tool_list_scripts(),
+        experts::tool_search_experts(),
+        experts::tool_search_indicators(),
+        experts::tool_search_scripts(),
+        experts::tool_copy_indicator_to_project(),
+        experts::tool_copy_script_to_project(),
         // System
         system::tool_verify_setup(),
         system::tool_list_symbols(),
         system::tool_healthcheck(),
+        system::tool_get_active_account(),
+        // Utility (8 tools)
+        utility::tool_check_symbol_data_status(),
+        utility::tool_get_backtest_history(),
+        utility::tool_compare_backtests(),
+        utility::tool_init_project(),
+        utility::tool_validate_ea_syntax(),
+        utility::tool_check_mt5_status(),
+        utility::tool_create_set_template(),
+        utility::tool_export_report(),
         // Set Files
         setfiles::tool_read_set_file(),
         setfiles::tool_write_set_file(),

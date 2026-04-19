@@ -35,3 +35,13 @@ pub fn tool_list_symbols() -> Value {
         }
     })
 }
+
+pub fn tool_get_active_account() -> Value {
+    json!({
+        "name": "get_active_account",
+        "description": "Get the currently active MT5 account session info (login, server, available symbols). Use this before backtesting to ensure symbol compatibility.",
+        "inputSchema": {
+            "type": "object"
+        }
+    })
+}

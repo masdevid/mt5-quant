@@ -6,7 +6,6 @@ mod pipeline;
 mod storage;
 mod tools;
 
-mod config;
 mod mcp_server;
 
 use anyhow::Result;

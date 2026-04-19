@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::fs;
+use walkdir::WalkDir;
 use crate::compile::MqlCompiler;
 use crate::models::Config;
 
@@ -10,9 +10,12 @@ pub async fn handle_list_experts(config: &Config, args: &Value) -> Result<Value>
     let mut experts = Vec::new();
     
     if let Some(experts_dir) = &config.experts_dir {
-        if let Ok(entries) = fs::read_dir(experts_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(experts_dir).max_depth(3) {
+            if let Ok(entry) = entry {
                 let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
                 if let Some(name) = path.file_stem() {
                     let name_str = name.to_string_lossy().to_string();
                     let is_compiled = path.extension()
@@ -47,6 +50,51 @@ pub async fn handle_list_experts(config: &Config, args: &Value) -> Result<Value>
     }))
 }
 
+pub async fn handle_search_experts(config: &Config, args: &Value) -> Result<Value> {
+    let pattern = args.get("pattern")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
+    
+    let pattern_lower = pattern.to_lowercase();
+    let mut matches = Vec::new();
+    
+    if let Some(experts_dir) = &config.experts_dir {
+        for entry in WalkDir::new(experts_dir).max_depth(3) {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Some(name) = path.file_stem() {
+                    let name_str = name.to_string_lossy().to_string();
+                    if name_str.to_lowercase().contains(&pattern_lower) {
+                        let is_compiled = path.extension()
+                            .map(|e| e == "ex5")
+                            .unwrap_or(false);
+                        matches.push(json!({
+                            "name": name_str,
+                            "path": path.to_string_lossy().to_string(),
+                            "compiled": is_compiled,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    
+    matches.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "pattern": pattern,
+            "count": matches.len(),
+            "matches": matches,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
 pub async fn handle_list_indicators(config: &Config, args: &Value) -> Result<Value> {
     let filter = args.get("filter").and_then(|v| v.as_str());
     let include_builtin = args.get("include_builtin").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -55,9 +103,12 @@ pub async fn handle_list_indicators(config: &Config, args: &Value) -> Result<Val
     
     // List custom indicators
     if let Some(indicators_dir) = &config.indicators_dir {
-        if let Ok(entries) = fs::read_dir(indicators_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(indicators_dir).max_depth(3) {
+            if let Ok(entry) = entry {
                 let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
                 if let Some(name) = path.file_stem() {
                     let name_str = name.to_string_lossy().to_string();
                     let is_compiled = path.extension()
@@ -120,9 +171,12 @@ pub async fn handle_list_scripts(config: &Config, args: &Value) -> Result<Value>
     let mut scripts = Vec::new();
     
     if let Some(scripts_dir) = &config.scripts_dir {
-        if let Ok(entries) = fs::read_dir(scripts_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(scripts_dir).max_depth(3) {
+            if let Ok(entry) = entry {
                 let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
                 if let Some(name) = path.file_stem() {
                     let name_str = name.to_string_lossy().to_string();
                     let is_compiled = path.extension()
@@ -209,6 +263,254 @@ pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
                 "content": [{ "type": "text", "text": json!({
                     "success": false,
                     "error": format!("Compilation failed: {}", e),
+                }).to_string() }],
+                "isError": true
+            }))
+        }
+    }
+}
+
+pub async fn handle_search_indicators(config: &Config, args: &Value) -> Result<Value> {
+    let pattern = args.get("pattern")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
+    
+    let include_builtin = args.get("include_builtin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let pattern_lower = pattern.to_lowercase();
+    
+    let mut matches = Vec::new();
+    
+    // Search custom indicators recursively
+    if let Some(indicators_dir) = &config.indicators_dir {
+        for entry in WalkDir::new(indicators_dir).max_depth(3) {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Some(name) = path.file_stem() {
+                    let name_str = name.to_string_lossy().to_string();
+                    if name_str.to_lowercase().contains(&pattern_lower) {
+                        let is_compiled = path.extension()
+                            .map(|e| e == "ex5")
+                            .unwrap_or(false);
+                        matches.push(json!({
+                            "name": name_str,
+                            "path": path.to_string_lossy().to_string(),
+                            "type": "custom",
+                            "compiled": is_compiled,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Search built-in indicators if requested
+    if include_builtin {
+        let builtin = vec![
+            "Accelerator", "Accumulation", "ADX", "Alligator", "AO", "ATR",
+            "Bands", "Bears", "Bulls", "CCI", "DeMarker", "Envelopes", "Force",
+            "Fractals", "Gator", "Ichimoku", "MA", "MACD", "MFI", "Momentum",
+            "OBV", "OsMA", "RSI", "RVI", "SAR", "StdDev", "Stochastic", "WPR",
+        ];
+        for name in builtin {
+            if name.to_lowercase().contains(&pattern_lower) {
+                matches.push(json!({
+                    "name": name,
+                    "path": null,
+                    "type": "builtin",
+                    "compiled": true,
+                }));
+            }
+        }
+    }
+    
+    matches.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "pattern": pattern,
+            "count": matches.len(),
+            "matches": matches,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_search_scripts(config: &Config, args: &Value) -> Result<Value> {
+    let pattern = args.get("pattern")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
+    
+    let pattern_lower = pattern.to_lowercase();
+    let mut matches = Vec::new();
+    
+    if let Some(scripts_dir) = &config.scripts_dir {
+        for entry in WalkDir::new(scripts_dir).max_depth(3) {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Some(name) = path.file_stem() {
+                    let name_str = name.to_string_lossy().to_string();
+                    if name_str.to_lowercase().contains(&pattern_lower) {
+                        let is_compiled = path.extension()
+                            .map(|e| e == "ex5")
+                            .unwrap_or(false);
+                        matches.push(json!({
+                            "name": name_str,
+                            "path": path.to_string_lossy().to_string(),
+                            "compiled": is_compiled,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    
+    matches.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "pattern": pattern,
+            "count": matches.len(),
+            "matches": matches,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_copy_indicator_to_project(config: &Config, args: &Value) -> Result<Value> {
+    use std::path::PathBuf;
+    
+    let source_path = args.get("source_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("source_path is required"))?;
+    
+    let target_name = args.get("target_name").and_then(|v| v.as_str());
+    
+    // Determine project directory
+    let project_dir = config.project_dir.as_ref()
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine project directory"))?;
+    
+    let source = PathBuf::from(source_path);
+    if !source.exists() {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": false,
+                "error": format!("Source file not found: {}", source_path),
+            }).to_string() }],
+            "isError": true
+        }));
+    }
+    
+    // Get extension
+    let ext = source.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mq5");
+    
+    // Determine target name
+    let target_filename = match target_name {
+        Some(name) => format!("{}.{}", name, ext),
+        None => source.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| format!("indicator.{}", ext)),
+    };
+    
+    let destination = project_dir.join(&target_filename);
+    
+    // Copy file
+    match std::fs::copy(&source, &destination) {
+        Ok(bytes) => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": true,
+                    "source": source_path,
+                    "destination": destination.to_string_lossy().to_string(),
+                    "bytes_copied": bytes,
+                }).to_string() }],
+                "isError": false
+            }))
+        }
+        Err(e) => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": false,
+                    "error": format!("Failed to copy file: {}", e),
+                }).to_string() }],
+                "isError": true
+            }))
+        }
+    }
+}
+
+pub async fn handle_copy_script_to_project(config: &Config, args: &Value) -> Result<Value> {
+    use std::path::PathBuf;
+    
+    let source_path = args.get("source_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("source_path is required"))?;
+    
+    let target_name = args.get("target_name").and_then(|v| v.as_str());
+    
+    // Determine project directory
+    let project_dir = config.project_dir.as_ref()
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine project directory"))?;
+    
+    let source = PathBuf::from(source_path);
+    if !source.exists() {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "success": false,
+                "error": format!("Source file not found: {}", source_path),
+            }).to_string() }],
+            "isError": true
+        }));
+    }
+    
+    // Get extension
+    let ext = source.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mq5");
+    
+    // Determine target name
+    let target_filename = match target_name {
+        Some(name) => format!("{}.{}", name, ext),
+        None => source.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| format!("script.{}", ext)),
+    };
+    
+    let destination = project_dir.join(&target_filename);
+    
+    // Copy file
+    match std::fs::copy(&source, &destination) {
+        Ok(bytes) => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": true,
+                    "source": source_path,
+                    "destination": destination.to_string_lossy().to_string(),
+                    "bytes_copied": bytes,
+                }).to_string() }],
+                "isError": false
+            }))
+        }
+        Err(e) => {
+            Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "success": false,
+                    "error": format!("Failed to copy file: {}", e),
                 }).to_string() }],
                 "isError": true
             }))
