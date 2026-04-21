@@ -1,6 +1,6 @@
 [package]
 name = "mt5-quant"
-version = "1.31.0"
+version = "1.31.1"
 edition = "2021"
 description = "MT5-Quant MCP Server - Exposes MT5 backtest and optimization tools via MCP"
 authors = ["masdevid <masdevid@example.com>"]
