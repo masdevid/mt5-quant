@@ -160,6 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Required for GitHub OIDC authentication
     steps:
       - name: Download MCP package
         uses: actions/download-artifact@v4
@@ -170,7 +171,6 @@ jobs:
       - name: Install mcp-publisher
         run: |
           # Download mcp-publisher from correct registry repository
-          # URL format: https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_linux_amd64.tar.gz
           curl -fsSL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_linux_amd64.tar.gz" || {
             echo "⚠️  Failed to download mcp-publisher - MCP publish will be skipped"
             echo "Install manually: https://github.com/modelcontextprotocol/registry/releases"
@@ -195,8 +195,8 @@ jobs:
           fi
           
           echo "=== MCP Registry Publish ==="
-          # Login with pre-authenticated token
-          echo "${{ secrets.MCP_PUBLISH_TOKEN }}" | mcp-publisher login github --token-stdin
+          # Use GitHub OIDC for authentication (no token needed)
+          mcp-publisher login github-oidc
           
           # Publish the server
           mcp-publisher publish
