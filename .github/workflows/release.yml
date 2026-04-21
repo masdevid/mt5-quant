@@ -7,11 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.31.0)'
+        description: 'Version tag (e.g., v1.32.0)'
         required: true
         type: string
 
 jobs:
+  # ── Build binaries ───────────────────────────────────────────────────────────
+
   build-macos:
     runs-on: macos-latest
     steps:
@@ -19,6 +21,16 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-cargo-
 
       - name: Build release binary
         run: cargo build --release
@@ -47,6 +59,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: linux-cargo-
+
       - name: Build release binary
         run: cargo build --release
 
@@ -66,11 +88,15 @@ jobs:
           name: linux-binary
           path: dist/mcp-mt5-quant-linux-x64.tar.gz
 
+  # ── GitHub Release ───────────────────────────────────────────────────────────
+
   release:
     needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -86,11 +112,11 @@ jobs:
           name: linux-binary
           path: dist
 
-      - name: Create or Update GitHub Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: ${{ github.event.inputs.version || github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           files: |
             dist/mcp-mt5-quant-macos-arm64.tar.gz
             dist/mcp-mt5-quant-linux-x64.tar.gz
@@ -100,15 +126,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── MCP Package ──────────────────────────────────────────────────────────────
+  # Builds the installable MCP package (binary + config + docs),
+  # computes its SHA256, and uploads to the release.
+
   build-mcp-package:
     needs: release
     runs-on: macos-latest
     permissions:
       contents: write
+    outputs:
+      sha256: ${{ steps.compute-sha256.outputs.sha256 }}
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download macOS artifact
+      - name: Download macOS binary
         uses: actions/download-artifact@v4
         with:
           name: macos-binary
@@ -116,36 +150,27 @@ jobs:
 
       - name: Build MCP package
         run: |
-          # Create MCP package structure
           mkdir -p mcp-package/mcp-server/bin
-          
-          # Extract binary from the tar.gz
-          cd dist
-          tar -xzf mcp-mt5-quant-macos-arm64.tar.gz
-          cp mcp-mt5-quant-macos/mt5-quant ../mcp-package/mcp-server/bin/
-          cd ..
-          
-          # Copy config and docs
+          cd dist && tar -xzf mcp-mt5-quant-macos-arm64.tar.gz && cd ..
+          cp dist/mcp-mt5-quant-macos/mt5-quant mcp-package/mcp-server/bin/
           cp -r config mcp-package/
           cp -r docs mcp-package/
           cp README.md mcp-package/
           cp server.json mcp-package/
-          
-          # Create tar.gz
-          cd mcp-package
-          tar -czf ../mcp-mt5-quant-macos-arm64.tar.gz .
-          cd ..
-          
-          # Calculate SHA256
-          shasum -a 256 mcp-mt5-quant-macos-arm64.tar.gz | awk '{print $1}' > mcp-sha256.txt
-          echo "MCP Package SHA256: $(cat mcp-sha256.txt)"
+          cd mcp-package && tar -czf ../mcp-mt5-quant-macos-arm64.tar.gz . && cd ..
+
+      - name: Compute SHA256
+        id: compute-sha256
+        run: |
+          SHA256=$(shasum -a 256 mcp-mt5-quant-macos-arm64.tar.gz | awk '{print $1}')
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "MCP Package SHA256: $SHA256"
 
       - name: Upload MCP package to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          files: |
-            mcp-mt5-quant-macos-arm64.tar.gz
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: mcp-mt5-quant-macos-arm64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -155,14 +180,81 @@ jobs:
           name: mcp-package
           path: mcp-mt5-quant-macos-arm64.tar.gz
 
-  mcp-publish:
+  # ── Update server.json SHA256 ────────────────────────────────────────────────
+  # Commits the computed SHA256 back to master so server.json always
+  # reflects the latest published package hash.
+
+  update-server-json:
     needs: build-mcp-package
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write  # Required for GitHub OIDC authentication
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch server.json
+        env:
+          PKG_SHA256: ${{ needs.build-mcp-package.outputs.sha256 }}
+          RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          VERSION="$VERSION" PKG_SHA256="$PKG_SHA256" python3 - <<'PYEOF'
+          import json, os, re
+
+          sha256  = os.environ['PKG_SHA256']
+          version = os.environ['VERSION']
+
+          with open('server.json') as f:
+              data = json.load(f)
+
+          data['version'] = version
+          for pkg in data.get('packages', []):
+              pkg['version']    = version
+              pkg['fileSha256'] = sha256
+              if 'identifier' in pkg:
+                  pkg['identifier'] = re.sub(
+                      r'/v[0-9]+\.[0-9]+\.[0-9]+/',
+                      f'/v{version}/',
+                      pkg['identifier']
+                  )
+
+          with open('server.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+
+          print(f"Patched: version={version}, sha256={sha256[:16]}...")
+          PYEOF
+
+      - name: Commit server.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add server.json
+          if git diff --cached --quiet; then
+            echo "server.json unchanged — no commit needed"
+          else
+            git commit -m "ci: update server.json SHA256 for v${VERSION} [skip ci]"
+            git push origin master
+            echo "Committed server.json update"
+          fi
+
+  # ── MCP Registry Publish ─────────────────────────────────────────────────────
+
+  mcp-publish:
+    needs: [build-mcp-package, update-server-json]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Required for GitHub OIDC
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master   # Pull master so server.json has the correct SHA256
 
       - name: Download MCP package
         uses: actions/download-artifact@v4
@@ -171,78 +263,120 @@ jobs:
           path: .
 
       - name: Install mcp-publisher
+        id: install-publisher
         run: |
-          # Download mcp-publisher from correct registry repository
-          curl -fsSL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_linux_amd64.tar.gz" || {
-            echo "⚠️  Failed to download mcp-publisher - MCP publish will be skipped"
-            echo "Install manually: https://github.com/modelcontextprotocol/registry/releases"
-            exit 0
-          }
-          tar -xzf mcp-publisher.tar.gz mcp-publisher
-          chmod +x mcp-publisher
-          sudo mv mcp-publisher /usr/local/bin/
-          rm mcp-publisher.tar.gz
+          # Resolve latest release tag from GitHub API
+          LATEST_TAG=$(curl -sf \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/modelcontextprotocol/registry/releases/latest" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])" \
+            2>/dev/null || echo "v1.0.0")
+
+          VERSION="${LATEST_TAG#v}"
+          URL="https://github.com/modelcontextprotocol/registry/releases/download/${LATEST_TAG}/mcp-publisher_${VERSION}_linux_amd64.tar.gz"
+          echo "Downloading mcp-publisher ${LATEST_TAG} from: $URL"
+
+          if curl -fsSL -o mcp-publisher.tar.gz "$URL"; then
+            tar -xzf mcp-publisher.tar.gz 2>/dev/null || true
+            BINARY=$(find . -maxdepth 3 -name "mcp-publisher" ! -path "./.git/*" | head -1)
+            if [[ -n "$BINARY" && -f "$BINARY" ]]; then
+              chmod +x "$BINARY"
+              sudo mv "$BINARY" /usr/local/bin/mcp-publisher
+              echo "installed=true" >> "$GITHUB_OUTPUT"
+              echo "Installed: $(mcp-publisher --version 2>/dev/null || echo 'ok')"
+            else
+              echo "installed=false" >> "$GITHUB_OUTPUT"
+              echo "Binary not found in archive"
+            fi
+            rm -f mcp-publisher.tar.gz
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "Download failed: $URL"
+          fi
+
+      - name: Validate server.json before publish
+        id: validate
+        run: |
+          python3 - <<'PYEOF'
+          import json, sys
+
+          with open('server.json') as f:
+              data = json.load(f)
+
+          print(f"  name:    {data.get('name')}")
+          print(f"  version: {data.get('version')}")
+
+          ok = True
+          for pkg in data.get('packages', []):
+              sha = pkg.get('fileSha256', '')
+              ident = pkg.get('identifier', '')
+              print(f"  sha256:  {sha}")
+              print(f"  url:     {ident}")
+              if sha in ('', 'TBD_CI_WILL_UPDATE', 'TBD_UPDATED_BY_CI'):
+                  print('ERROR: fileSha256 is a placeholder — publish aborted')
+                  ok = False
+
+          sys.exit(0 if ok else 1)
+          PYEOF
 
       - name: Publish to MCP Registry
+        if: steps.install-publisher.outputs.installed == 'true' && steps.validate.outcome == 'success'
         run: |
-          # Check if mcp-publisher is available
-          if ! command -v mcp-publisher &> /dev/null; then
-            echo "⚠️  mcp-publisher not found - skipping automated MCP publish"
-            exit 0
-          fi
-          
-          echo "=== MCP Registry Publish ==="
-          # Use GitHub OIDC for authentication (no token needed)
-          mcp-publisher login github-oidc || echo "⚠️  Login failed"
-          
-          # Publish the server (may fail due to mcp-publisher bug with registryType)
-          mcp-publisher publish || {
-            echo ""
-            echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  ⚠️  AUTOMATED MCP PUBLISH FAILED - MANUAL ACTION REQUIRED      ║"
-            echo "╚══════════════════════════════════════════════════════════════════╝"
-            echo ""
-            echo "The release was created successfully, but MCP registry publish failed."
-            echo "This is a known issue with mcp-publisher's registryType handling."
-            echo ""
-            echo "To publish manually:"
-            echo "  1. Download mcp-publisher:"
-            echo "     curl -L \"https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz\" | tar xz mcp-publisher"
-            echo "  2. Login: ./mcp-publisher login github"
-            echo "  3. Publish: ./mcp-publisher publish"
-            echo ""
-            echo "Or use the MCP Registry web UI: https://registry.modelcontextprotocol.io"
-            echo ""
-            exit 0  # Don't fail the workflow
+          echo "=== Authenticating with GitHub OIDC ==="
+          mcp-publisher login github-oidc || {
+            echo "OIDC login failed"
+            exit 1
           }
-          
-          echo "✓ Published to MCP Registry"
+
+          echo "=== Publishing ==="
+          mcp-publisher publish && echo "✓ Published to MCP Registry" || {
+            echo ""
+            echo "══════════════════════════════════════════════════════════"
+            echo "  AUTOMATED MCP PUBLISH FAILED — manual steps:"
+            echo "══════════════════════════════════════════════════════════"
+            echo "  1. Download: https://github.com/modelcontextprotocol/registry/releases"
+            echo "  2. ./mcp-publisher login github"
+            echo "  3. ./mcp-publisher publish"
+            echo "  Web UI: https://registry.modelcontextprotocol.io"
+            echo "══════════════════════════════════════════════════════════"
+            exit 0   # Don't fail the workflow — release succeeded
+          }
+
+      - name: Skip notice
+        if: steps.install-publisher.outputs.installed != 'true'
+        run: |
+          echo "mcp-publisher not installed — skipping automated publish"
+          echo "Manual: https://registry.modelcontextprotocol.io"
+
+  # ── Release Summary ──────────────────────────────────────────────────────────
 
   release-info:
     needs: [mcp-publish]
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
     steps:
-      - name: Display Release Commands
+      - name: Summary
         run: |
           echo ""
-          echo "╔════════════════════════════════════════════════════════════════╗"
-          echo "║             🎉 RELEASE COMPLETED SUCCESSFULLY! 🎉              ║"
-          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║              Release ${RELEASE_TAG} complete!                "
+          echo "╚══════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "📦 GitHub Release: https://github.com/masdevid/mt5-quant/releases/tag/${{ github.event.inputs.version || github.ref_name }}"
-          echo "📦 MCP Registry: io.github.masdevid/mt5-quant"
+          echo "GitHub Release:"
+          echo "  https://github.com/masdevid/mt5-quant/releases/tag/${RELEASE_TAG}"
           echo ""
-          echo "═══════════════════════════════════════════════════════════════════"
-          echo "  MCP CLIENT REGISTRATION COMMANDS"
-          echo "═══════════════════════════════════════════════════════════════════"
+          echo "MCP Registry: io.github.masdevid/mt5-quant"
           echo ""
-          echo "▶️  CLAUDE CODE:"
-          echo "   claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant"
+          echo "── MCP Client Registration ──────────────────────────────────"
           echo ""
-          echo "▶️  WINDSURF:"
-          echo '   echo \'{"mcpServers": {"io.github.masdevid/mt5-quant": {"command": "~/.local/bin/mt5-quant", "disabled": false, "registry": "io.github.masdevid/mt5-quant"}}}\' >> ~/.codeium/windsurf/mcp_config.json'
+          echo "Claude Code:"
+          echo "  claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant"
           echo ""
-          echo "▶️  CURSOR / VSCODE:"
-          echo '   mkdir -p ~/.cursor && echo \'{"mcpServers": {"mt5-quant": {"command": "~/.local/bin/mt5-quant"}}}\' > ~/.cursor/mcp.json'
+          echo "Windsurf  (~/.codeium/windsurf/mcp_config.json):"
+          echo '  {"mcpServers": {"io.github.masdevid/mt5-quant": {"command": "~/.local/bin/mt5-quant"}}}'
           echo ""
-          echo "═══════════════════════════════════════════════════════════════════"
+          echo "Cursor / VS Code  (~/.cursor/mcp.json):"
+          echo '  {"mcpServers": {"mt5-quant": {"command": "~/.local/bin/mt5-quant"}}}'
+          echo ""
+          echo "─────────────────────────────────────────────────────────────"
