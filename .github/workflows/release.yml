@@ -187,21 +187,34 @@ jobs:
         run: |
           # Check if mcp-publisher is available
           if ! command -v mcp-publisher &> /dev/null; then
-            echo "⚠️  mcp-publisher not found - skipping MCP publish"
-            echo "To publish manually:"
-            echo "  1. Install mcp-publisher:"
-            echo "     curl -L \"https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz\" | tar xz mcp-publisher"
-            echo "  2. Run: mcp-publisher login github"
-            echo "  3. Run: mcp-publisher publish"
+            echo "⚠️  mcp-publisher not found - skipping automated MCP publish"
             exit 0
           fi
           
           echo "=== MCP Registry Publish ==="
           # Use GitHub OIDC for authentication (no token needed)
-          mcp-publisher login github-oidc
+          mcp-publisher login github-oidc || echo "⚠️  Login failed"
           
-          # Publish the server
-          mcp-publisher publish
+          # Publish the server (may fail due to mcp-publisher bug with registryType)
+          mcp-publisher publish || {
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  ⚠️  AUTOMATED MCP PUBLISH FAILED - MANUAL ACTION REQUIRED      ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "The release was created successfully, but MCP registry publish failed."
+            echo "This is a known issue with mcp-publisher's registryType handling."
+            echo ""
+            echo "To publish manually:"
+            echo "  1. Download mcp-publisher:"
+            echo "     curl -L \"https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.tar.gz\" | tar xz mcp-publisher"
+            echo "  2. Login: ./mcp-publisher login github"
+            echo "  3. Publish: ./mcp-publisher publish"
+            echo ""
+            echo "Or use the MCP Registry web UI: https://registry.modelcontextprotocol.io"
+            echo ""
+            exit 0  # Don't fail the workflow
+          }
           
           echo "✓ Published to MCP Registry"
 
