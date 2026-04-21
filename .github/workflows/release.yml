@@ -162,6 +162,8 @@ jobs:
       contents: read
       id-token: write  # Required for GitHub OIDC authentication
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download MCP package
         uses: actions/download-artifact@v4
         with:
