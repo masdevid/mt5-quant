@@ -160,7 +160,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Download MCP package
         uses: actions/download-artifact@v4
@@ -174,18 +173,13 @@ jobs:
           chmod +x mcp-publisher
           sudo mv mcp-publisher /usr/local/bin/
 
-      - name: Authenticate and Publish
+      - name: Publish to MCP Registry
         run: |
-          echo "=== MCP Publish ==="
-          echo "This step requires manual authentication."
-          echo "For CI/CD, use OIDC authentication (requires registry setup)"
-          echo ""
-          echo "To publish manually from local machine:"
-          echo "1. Download the MCP package from the release"
-          echo "2. Run: mcp-publisher login github"
-          echo "3. Run: mcp-publisher publish"
-          echo ""
-          echo "For automated publishing, configure OIDC:"
-          echo "mcp-publisher login github-oidc"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "=== MCP Registry Publish ==="
+          # Login with pre-authenticated token
+          echo "${{ secrets.MCP_PUBLISH_TOKEN }}" | mcp-publisher login github --token-stdin
+          
+          # Publish the server
+          mcp-publisher publish
+          
+          echo "✓ Published to MCP Registry"

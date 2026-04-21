@@ -131,7 +131,60 @@ Edit `~/.cursor/mcp.json` or `.vscode/mcp.json`:
 }
 ```
 
-## 10. Post-Release Verification
+## 10. MCP Client Registration
+
+After installing the binary, register with your MCP clients:
+
+### Windsurf
+
+// turbo
+```bash
+# Add to Windsurf MCP config
+cat >> ~/.codeium/windsurf/mcp_config.json << 'EOF'
+{
+  "mcpServers": {
+    "io.github.masdevid/mt5-quant": {
+      "command": "~/.local/bin/mt5-quant",
+      "disabled": false,
+      "registry": "io.github.masdevid/mt5-quant"
+    }
+  }
+}
+EOF
+```
+
+### Claude Code
+
+// turbo
+```bash
+# Register with Claude Code
+claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant
+
+# Or with custom name
+claude mcp add mt5-quant -- ~/.local/bin/mt5-quant
+```
+
+### VS Code / Cursor
+
+// turbo
+```bash
+# Add to Cursor MCP config
+mkdir -p ~/.cursor
+cat > ~/.cursor/mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "mt5-quant": {
+      "command": "~/.local/bin/mt5-quant",
+      "env": {
+        "MT5_MCP_HOME": "~/.config/mt5-quant"
+      }
+    }
+  }
+}
+EOF
+```
+
+## 11. Post-Release Verification
 
 // turbo
 ```bash
@@ -140,6 +193,9 @@ Edit `~/.cursor/mcp.json` or `.vscode/mcp.json`:
 
 # Verify tool count
 ./target/release/mt5-quant 2>&1 | head -20
+
+# Check MCP registration
+claude mcp list
 ```
 
 ## Quick Release Commands
