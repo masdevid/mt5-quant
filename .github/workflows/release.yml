@@ -25,19 +25,19 @@ jobs:
 
       - name: Package binary
         run: |
-          mkdir -p dist/mt5-quant-macos
-          cp target/release/mt5-quant dist/mt5-quant-macos/
-          cp -r config dist/mt5-quant-macos/
-          cp README.md dist/mt5-quant-macos/
-          cp -r docs dist/mt5-quant-macos/
+          mkdir -p dist/mcp-mt5-quant-macos
+          cp target/release/mt5-quant dist/mcp-mt5-quant-macos/
+          cp -r config dist/mcp-mt5-quant-macos/
+          cp README.md dist/mcp-mt5-quant-macos/
+          cp -r docs dist/mcp-mt5-quant-macos/
           cd dist
-          tar -czf mt5-quant-macos-arm64.tar.gz mt5-quant-macos
+          tar -czf mcp-mt5-quant-macos-arm64.tar.gz mcp-mt5-quant-macos
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-binary
-          path: dist/mt5-quant-macos-arm64.tar.gz
+          path: dist/mcp-mt5-quant-macos-arm64.tar.gz
 
   build-linux:
     runs-on: ubuntu-latest
@@ -52,19 +52,19 @@ jobs:
 
       - name: Package binary
         run: |
-          mkdir -p dist/mt5-quant-linux
-          cp target/release/mt5-quant dist/mt5-quant-linux/
-          cp -r config dist/mt5-quant-linux/
-          cp README.md dist/mt5-quant-linux/
-          cp -r docs dist/mt5-quant-linux/
+          mkdir -p dist/mcp-mt5-quant-linux
+          cp target/release/mt5-quant dist/mcp-mt5-quant-linux/
+          cp -r config dist/mcp-mt5-quant-linux/
+          cp README.md dist/mcp-mt5-quant-linux/
+          cp -r docs dist/mcp-mt5-quant-linux/
           cd dist
-          tar -czf mt5-quant-linux-x64.tar.gz mt5-quant-linux
+          tar -czf mcp-mt5-quant-linux-x64.tar.gz mcp-mt5-quant-linux
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-binary
-          path: dist/mt5-quant-linux-x64.tar.gz
+          path: dist/mcp-mt5-quant-linux-x64.tar.gz
 
   release:
     needs: [build-macos, build-linux]
@@ -92,8 +92,8 @@ jobs:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: ${{ github.event.inputs.version || github.ref_name }}
           files: |
-            dist/mt5-quant-macos-arm64.tar.gz
-            dist/mt5-quant-linux-x64.tar.gz
+            dist/mcp-mt5-quant-macos-arm64.tar.gz
+            dist/mcp-mt5-quant-linux-x64.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -121,8 +121,8 @@ jobs:
           
           # Extract binary from the tar.gz
           cd dist
-          tar -xzf mt5-quant-macos-arm64.tar.gz
-          cp mt5-quant-macos/mt5-quant ../mcp-package/mcp-server/bin/
+          tar -xzf mcp-mt5-quant-macos-arm64.tar.gz
+          cp mcp-mt5-quant-macos/mt5-quant ../mcp-package/mcp-server/bin/
           cd ..
           
           # Copy config and docs
