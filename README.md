@@ -1,6 +1,6 @@
 # MT5-Quant
 
-**MCP server for MT5 strategy development on macOS/Linux.** 85 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
+**MCP server for MT5 strategy development on macOS/Linux.** 87 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
 
 ```
 You: "Backtest MyEA Jan-Mar, what caused the February drawdown?"
@@ -62,18 +62,22 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [VSCODE.md](docs/VSCODE.md) | VS Code setup |
 | [ANTIGRAVITY.md](docs/ANTIGRAVITY.md) | Antigravity IDE setup |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
-| [TOOLS.md](docs/MCP_TOOLS.md) | All 75 tools documented |
+| [TOOLS.md](docs/MCP_TOOLS.md) | All 87 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
 | [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |
 
-## MCP Tools (75)
+## MCP Tools (87)
 
 ### Core workflow
 
 | Tool | Description |
 |------|-------------|
 | `run_backtest` | Full pipeline: compile → clean → backtest → extract → analyze |
+| `run_backtest_quick` | Quick backtest using pre-compiled EA (skip compile) |
+| `run_backtest_only` | Backtest only - just extract raw trades, no analysis |
+| `launch_backtest` | Fire-and-forget: launch MT5 backtest, poll for completion |
+| `get_backtest_status` | Poll running backtest status (MT5 running, report found, elapsed time) |
 | `run_optimization` | Genetic optimization (background, returns immediately) |
 | `get_optimization_results` | Parse optimization results after MT5 finishes |
 | `analyze_report` | Read `analysis.json` from any report directory |
@@ -119,7 +123,6 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | Tool | Description |
 |------|-------------|
 | `verify_setup` | Check Wine/MT5 paths, Wine version, and EA/set file counts |
-| `get_backtest_status` | Check live progress of a running backtest pipeline |
 | `get_optimization_status` | Check live state of a background optimization job |
 | `list_jobs` | All optimization jobs with compact status in one call |
 

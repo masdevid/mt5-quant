@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use crate::models::Config;
+use crate::models::report::BacktestJob;
 use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 
 /// Pre-flight check result for backtest readiness
@@ -190,36 +192,241 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
     }))
 }
 
+pub async fn handle_run_backtest_quick(config: &Config, args: &Value) -> Result<Value> {
+    // Quick backtest: skip compile, do clean → backtest → extract → analyze
+    let mut args = args.clone();
+    if let Some(obj) = args.as_object_mut() {
+        obj.insert("skip_compile".to_string(), json!(true));
+        // keep skip_analyze as false (default) to run analysis
+    }
+    handle_run_backtest(config, &args).await
+}
+
+pub async fn handle_run_backtest_only(config: &Config, args: &Value) -> Result<Value> {
+    // Backtest only: skip compile, skip analyze - just backtest and extract
+    let mut args = args.clone();
+    if let Some(obj) = args.as_object_mut() {
+        obj.insert("skip_compile".to_string(), json!(true));
+        obj.insert("skip_analyze".to_string(), json!(true));
+    }
+    handle_run_backtest(config, &args).await
+}
+
+pub async fn handle_launch_backtest(config: &Config, args: &Value) -> Result<Value> {
+    let expert = args.get("expert")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
+
+    // Run pre-flight check
+    let preflight = BacktestPreflight::check(config, expert);
+    
+    // Check account session
+    if preflight.account.is_none() {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "error": "No active MT5 account session detected.",
+                "hint": "Open MT5 and login to your trading account before running backtests."
+            }).to_string() }],
+            "isError": true
+        }));
+    }
+    
+    // Get symbol
+    let requested_symbol = args.get("symbol")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let symbol = if requested_symbol.is_empty() {
+        config.backtest_symbol.clone()
+            .or_else(|| preflight.available_symbols.first().cloned())
+            .unwrap_or_else(|| "EURUSD".to_string())
+    } else {
+        requested_symbol.to_string()
+    };
+    
+    // EA existence check
+    if !preflight.ea_exists {
+        return Ok(json!({
+            "content": [{ "type": "text", "text": json!({
+                "error": format!("EA '{}' not found in Experts directory.", expert),
+                "hint": "Use search_experts or list_experts to find available EAs."
+            }).to_string() }],
+            "isError": true
+        }));
+    }
+
+    // Date defaulting
+    let (from_date, to_date) = {
+        let f = args.get("from_date").and_then(|v| v.as_str()).unwrap_or("");
+        let t = args.get("to_date").and_then(|v| v.as_str()).unwrap_or("");
+        if f.is_empty() || t.is_empty() {
+            super::past_complete_month()
+        } else {
+            (f.to_string(), t.to_string())
+        }
+    };
+
+    let params = BacktestParams {
+        expert: expert.to_string(),
+        symbol: symbol.to_string(),
+        from_date: from_date.to_string(),
+        to_date: to_date.to_string(),
+        timeframe: args.get("timeframe").and_then(|v| v.as_str()).unwrap_or("M5").to_string(),
+        deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
+        model: args.get("model").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
+        leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
+        set_file: args.get("set_file").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        skip_compile: args.get("skip_compile").and_then(|v| v.as_bool()).unwrap_or(false),
+        skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
+        skip_analyze: true, // Not needed for launch mode
+        deep_analyze: false,
+        shutdown: false, // Don't shutdown so we can poll
+        kill_existing: false,
+        timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
+        gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
+    };
+
+    let pipeline = BacktestPipeline::new(config.clone());
+    let job = pipeline.launch_backtest(params).await?;
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "message": "Backtest launched successfully. Use get_backtest_status to poll for completion.",
+            "report_id": job.report_id,
+            "report_dir": job.report_dir,
+            "expert": job.expert,
+            "symbol": job.symbol,
+            "timeframe": job.timeframe,
+            "launched_at": job.launched_at,
+            "timeout_seconds": job.timeout_seconds,
+            "poll_hint": "Call get_backtest_status with report_dir to check progress"
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
 pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Result<Value> {
     let report_dir = args.get("report_dir")
         .and_then(|v| v.as_str())
         .unwrap_or("latest");
 
-    let progress_file = Path::new(report_dir).join("progress.log");
+    let report_path = Path::new(report_dir);
+    let progress_file = report_path.join("progress.log");
+    let job_file = report_path.join("job.json");
     
-    let status = if progress_file.exists() {
+    // Load job info if available
+    let job: Option<BacktestJob> = if job_file.exists() {
+        fs::read_to_string(&job_file)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    } else {
+        None
+    };
+    
+    // Check progress log for stage
+    let (stage, progress_lines) = if progress_file.exists() {
         if let Ok(content) = fs::read_to_string(&progress_file) {
-            let last_line = content.lines().last().unwrap_or("");
-            if last_line.contains("DONE") {
-                "completed"
-            } else {
-                "running"
-            }
+            let lines: Vec<&str> = content.lines().collect();
+            let last_stage = lines.last()
+                .and_then(|l| l.split_whitespace().next())
+                .unwrap_or("UNKNOWN");
+            (last_stage.to_string(), lines.len())
         } else {
-            "unknown"
+            ("UNKNOWN".to_string(), 0)
         }
     } else {
+        ("NOT_STARTED".to_string(), 0)
+    };
+    
+    // Check if MT5 is running
+    let mt5_running = is_mt5_running();
+    
+    // Check if report file exists
+    let report_found = job.as_ref()
+        .map(|j| Path::new(&j.expected_report_path).exists())
+        .unwrap_or(false);
+    
+    // Check for completed artifacts
+    let metrics_exists = report_path.join("metrics.json").exists();
+    let deals_exists = report_path.join("deals.csv").exists();
+    let is_complete = stage == "DONE" || (report_found && metrics_exists);
+    
+    // Calculate elapsed time if job exists
+    let elapsed_seconds = job.as_ref()
+        .and_then(|j| {
+            chrono::DateTime::parse_from_rfc3339(&j.launched_at)
+                .ok()
+                .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds())
+        })
+        .unwrap_or(0);
+    
+    // Determine status message
+    let status_msg = if is_complete {
+        "completed"
+    } else if stage == "BACKTEST" && mt5_running {
+        "running"
+    } else if stage == "BACKTEST" && !mt5_running && !report_found {
+        "failed"
+    } else if progress_lines > 0 {
+        "in_progress"
+    } else {
         "not_started"
+    };
+    
+    let message = if is_complete {
+        "Backtest completed successfully"
+    } else if stage == "BACKTEST" && mt5_running {
+        "MT5 is running the backtest"
+    } else if stage == "BACKTEST" && !mt5_running {
+        "MT5 process exited but report not found - backtest may have failed"
+    } else {
+        &format!("Backtest is at stage: {}", stage)
     };
 
     Ok(json!({
         "content": [{ "type": "text", "text": json!({
             "success": true,
             "report_dir": report_dir,
-            "status": status
+            "status": status_msg,
+            "stage": stage,
+            "is_complete": is_complete,
+            "mt5_running": mt5_running,
+            "report_found": report_found,
+            "metrics_extracted": metrics_exists,
+            "deals_extracted": deals_exists,
+            "elapsed_seconds": elapsed_seconds,
+            "message": message,
+            "job": job.map(|j| {
+                json!({
+                    "report_id": j.report_id,
+                    "expert": j.expert,
+                    "symbol": j.symbol,
+                    "timeframe": j.timeframe,
+                    "launched_at": j.launched_at,
+                    "timeout_seconds": j.timeout_seconds
+                })
+            })
         }).to_string() }],
         "isError": false
     }))
+}
+
+/// Check if MT5 is currently running
+fn is_mt5_running() -> bool {
+    let patterns = if cfg!(target_os = "macos") {
+        vec!["MetaTrader 5\\.app", "terminal64\\.exe"]
+    } else {
+        vec!["terminal64\\.exe", "metatrader"]
+    };
+    
+    patterns.iter().any(|pat| {
+        Command::new("pgrep")
+            .args(["-f", pat])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
 }
 
 pub async fn handle_cache_status(config: &Config) -> Result<Value> {

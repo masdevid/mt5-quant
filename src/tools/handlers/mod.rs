@@ -42,8 +42,11 @@ impl ToolHandler {
             "copy_indicator_to_project" => experts::handle_copy_indicator_to_project(&self.config, args).await,
             "copy_script_to_project" => experts::handle_copy_script_to_project(&self.config, args).await,
             
-            // Backtest handlers
-            "run_backtest" => backtest::handle_run_backtest(&self.config, args).await,
+            // Backtest handlers - Granular pipeline options
+            "run_backtest" => backtest::handle_run_backtest(&self.config, args).await,           // Full: compile + clean + backtest + extract + analyze
+            "run_backtest_quick" => backtest::handle_run_backtest_quick(&self.config, args).await, // Quick: skip compile, do backtest + extract + analyze
+            "run_backtest_only" => backtest::handle_run_backtest_only(&self.config, args).await,  // Minimal: skip compile, do backtest + extract only
+            "launch_backtest" => backtest::handle_launch_backtest(&self.config, args).await,     // Fire-and-forget mode
             "get_backtest_status" => backtest::handle_get_backtest_status(&self.config, args).await,
             "cache_status" => backtest::handle_cache_status(&self.config).await,
             "clean_cache" => backtest::handle_clean_cache(&self.config, args).await,

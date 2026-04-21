@@ -242,7 +242,7 @@ pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
     let compiler = MqlCompiler::new(config.clone());
     let expert_path = resolved_path.as_str();
     
-    match compiler.compile(&expert_path) {
+    match compiler.compile(&expert_path).await {
         Ok(result) => {
             Ok(json!({
                 "content": [{ "type": "text", "text": json!({

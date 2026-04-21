@@ -2,7 +2,7 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** This file documents 49 of 85 total tools. Missing:
+> **Documentation Status:** This file documents 56 of 87 total tools. Missing:
 > - `list_experts`, `list_indicators`, `list_scripts`
 > - `healthcheck`, `list_symbols`
 > - Reports query: `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`, `get_report_by_id`, `get_reports_summary`, `get_best_reports`, `search_reports_by_tags`, `search_reports_by_date_range`, `search_reports_by_notes`, `get_reports_by_set_file`, `get_comparable_reports`
@@ -139,6 +139,124 @@ Run a complete backtest pipeline: compile → clean cache → backtest → extra
     "analysis_json": "reports/20250619_143022_MyEA_XAUUSD_M5/analysis.json",
     "deals_csv": "reports/20250619_143022_MyEA_XAUUSD_M5/deals.csv",
     "deals_json": "reports/20250619_143022_MyEA_XAUUSD_M5/deals.json"
+  }
+}
+```
+
+---
+
+## `run_backtest_quick`
+
+Quick backtest using pre-compiled EA: clean cache → backtest → extract → analyze.
+
+**When to call:** When EA code hasn't changed and you just want to test different parameters or date ranges. Faster than `run_backtest` because it skips compilation.
+
+### Input schema
+
+Same as `run_backtest`, but `skip_compile` is automatically set to `true`.
+
+### Output schema
+
+Same as `run_backtest`.
+
+---
+
+## `run_backtest_only`
+
+Backtest only: clean cache → backtest → extract. No analysis phase.
+
+**When to call:** When you just need raw trade data (deals.csv) and don't need analytics. Fastest option for batch processing.
+
+### Input schema
+
+Same as `run_backtest`, but `skip_compile` and `skip_analyze` are automatically set to `true`.
+
+### Output schema
+
+Same as `run_backtest` but without `analysis_summary`.
+
+---
+
+## `launch_backtest`
+
+Fire-and-forget mode: compile → clean → launch MT5 backtest, return immediately with job info.
+
+**When to call:** When you want to launch a backtest without waiting for completion. Use `get_backtest_status` to poll for completion.
+
+### Input schema
+
+```typescript
+{
+  expert: string;          // Required. EA name without path or extension
+  symbol?: string;         // Trading symbol (default: from config or first available)
+  from_date?: string;      // Start date YYYY.MM.DD (default: past complete month)
+  to_date?: string;        // End date YYYY.MM.DD (default: past complete month)
+  timeframe?: string;      // M1, M5, M15, M30, H1, H4, D1 (default: M5)
+  deposit?: number;        // Initial deposit (default: 10000)
+  model?: 0 | 1 | 2;      // Tick model (default: 0)
+  set_file?: string;       // Path to .set parameter file
+  skip_compile?: boolean;  // Skip compilation
+  skip_clean?: boolean;    // Skip cache cleaning
+  timeout?: number;        // Max time in seconds (default: 900)
+  gui?: boolean;          // Enable MT5 visualization
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: true;
+  message: string;         // "Backtest launched successfully..."
+  report_id: string;       // e.g., "20250122_034455_MyEA_XAUUSD_M5"
+  report_dir: string;      // Full path to report directory
+  expert: string;
+  symbol: string;
+  timeframe: string;
+  launched_at: string;     // ISO8601 timestamp
+  timeout_seconds: number;
+  poll_hint: string;       // "Call get_backtest_status with report_dir to check progress"
+}
+```
+
+---
+
+## `get_backtest_status`
+
+Check progress of a running backtest pipeline launched via `launch_backtest`.
+
+**When to call:** Poll periodically after calling `launch_backtest` to check completion status.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;  // Report directory path from launch_backtest output
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: true;
+  report_dir: string;
+  status: "completed" | "running" | "failed" | "in_progress" | "not_started";
+  stage: string;           // Current pipeline stage: COMPILE, CLEAN, BACKTEST, EXTRACT, ANALYZE, DONE
+  is_complete: boolean;    // True if backtest finished successfully
+  mt5_running: boolean;    // Whether MT5 process is active
+  report_found: boolean;     // Whether report file exists
+  metrics_extracted: boolean;
+  deals_extracted: boolean;
+  elapsed_seconds: number;   // Time since launch
+  message: string;          // Human-readable status message
+  job?: {
+    report_id: string;
+    expert: string;
+    symbol: string;
+    timeframe: string;
+    launched_at: string;
+    timeout_seconds: number;
   }
 }
 ```

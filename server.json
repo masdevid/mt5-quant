@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.masdevid/mt5-quant",
   "title": "MT5-Quant",
-  "description": "MT5 strategy development with 85 tools. Backtest, optimize, debug MQL5 EAs on macOS/Linux.",
+  "description": "MT5 strategy development with 87 tools. Backtest, optimize, debug MQL5 EAs on macOS/Linux.",
   "repository": {
     "url": "https://github.com/masdevid/mt5-quant",
     "source": "github"
   },
-  "version": "1.30.0",
+  "version": "1.31.0",
   "packages": [
     {
       "registryType": "mcpb",
-      "version": "1.30.0",
-      "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.30.0/mcp-mt5-quant-macos-arm64.tar.gz",
-      "fileSha256": "6028b87c5be71db157c83e9804936190d9c3c546089e728b87496cbfc4168c0d",
+      "version": "1.31.0",
+      "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.31.0/mcp-mt5-quant-macos-arm64.tar.gz",
+      "fileSha256": "b23ab29823c14bc2c968869ec9ce0787e60fe531f40f19e6492d0b3314f8223d",
       "transport": {
         "type": "stdio"
       },

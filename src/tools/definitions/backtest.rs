@@ -3,7 +3,85 @@ use serde_json::{json, Value};
 pub fn tool_run_backtest() -> Value {
     json!({
         "name": "run_backtest",
-        "description": "Run a complete MT5 backtest pipeline: compile → clean cache → backtest → extract → analyze",
+        "description": "Full backtest pipeline: compile EA → clean cache → run backtest → extract results → analyze. Use this when you have modified the EA source code.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["expert"],
+            "properties": {
+                "expert": { "type": "string", "description": "EA name without path or extension" },
+                "symbol": { "type": "string", "description": "Trading symbol (default: from config or first available)" },
+                "from_date": { "type": "string", "description": "Start date YYYY.MM.DD (default: past complete month)" },
+                "to_date": { "type": "string", "description": "End date YYYY.MM.DD (default: past complete month)" },
+                "timeframe": { "type": "string", "enum": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"], "description": "Chart timeframe (default: M5)" },
+                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" },
+                "model": { "type": "integer", "enum": [0, 1, 2], "description": "Tick model: 0=Every tick, 1=OHLC, 2=Open prices" },
+                "set_file": { "type": "string", "description": "Path to .set parameter file for EA inputs" },
+                "skip_compile": { "type": "boolean", "description": "Skip compilation (use existing .ex5)" },
+                "skip_clean": { "type": "boolean", "description": "Skip cache cleaning" },
+                "skip_analyze": { "type": "boolean", "description": "Skip analysis phase" },
+                "deep": { "type": "boolean", "description": "Run deep analysis with extra metrics" },
+                "shutdown": { "type": "boolean", "description": "Close MT5 after backtest completes" },
+                "kill_existing": { "type": "boolean", "description": "Kill any running MT5 instance first" },
+                "timeout": { "type": "integer", "description": "Max wait time in seconds (default: 900)" },
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization window" }
+            }
+        }
+    })
+}
+
+pub fn tool_run_backtest_quick() -> Value {
+    json!({
+        "name": "run_backtest_quick",
+        "description": "Quick backtest using pre-compiled EA: clean cache → run backtest → extract → analyze. Skips compilation. Use when EA code hasn't changed.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["expert"],
+            "properties": {
+                "expert": { "type": "string", "description": "EA name without path or extension (must have .ex5 compiled)" },
+                "symbol": { "type": "string", "description": "Trading symbol (default: from config or first available)" },
+                "from_date": { "type": "string", "description": "Start date YYYY.MM.DD (default: past complete month)" },
+                "to_date": { "type": "string", "description": "End date YYYY.MM.DD (default: past complete month)" },
+                "timeframe": { "type": "string", "enum": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"], "description": "Chart timeframe (default: M5)" },
+                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" },
+                "model": { "type": "integer", "enum": [0, 1, 2], "description": "Tick model" },
+                "set_file": { "type": "string", "description": "Path to .set parameter file for EA inputs" },
+                "deep": { "type": "boolean", "description": "Run deep analysis" },
+                "shutdown": { "type": "boolean", "description": "Close MT5 after backtest" },
+                "timeout": { "type": "integer", "description": "Max wait time in seconds (default: 900)" },
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization" }
+            }
+        }
+    })
+}
+
+pub fn tool_run_backtest_only() -> Value {
+    json!({
+        "name": "run_backtest_only",
+        "description": "Backtest only: just run backtest and extract results. No compile, no analysis. Fastest option when you just need raw trade data.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["expert"],
+            "properties": {
+                "expert": { "type": "string", "description": "EA name without path or extension (must have .ex5 compiled)" },
+                "symbol": { "type": "string", "description": "Trading symbol (default: from config)" },
+                "from_date": { "type": "string", "description": "Start date YYYY.MM.DD" },
+                "to_date": { "type": "string", "description": "End date YYYY.MM.DD" },
+                "timeframe": { "type": "string", "enum": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"], "description": "Chart timeframe (default: M5)" },
+                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" },
+                "model": { "type": "integer", "enum": [0, 1, 2], "description": "Tick model" },
+                "set_file": { "type": "string", "description": "Path to .set parameter file" },
+                "shutdown": { "type": "boolean", "description": "Close MT5 after backtest" },
+                "timeout": { "type": "integer", "description": "Max wait time (default: 900)" },
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization" }
+            }
+        }
+    })
+}
+
+pub fn tool_launch_backtest() -> Value {
+    json!({
+        "name": "launch_backtest",
+        "description": "Launch MT5 backtest in fire-and-forget mode: compile → clean cache → launch MT5 backtest, then return immediately. Use get_backtest_status to poll for completion.",
         "inputSchema": {
             "type": "object",
             "required": ["expert"],
@@ -18,12 +96,8 @@ pub fn tool_run_backtest() -> Value {
                 "set_file": { "type": "string", "description": "Path to .set parameter file" },
                 "skip_compile": { "type": "boolean" },
                 "skip_clean": { "type": "boolean" },
-                "skip_analyze": { "type": "boolean" },
-                "deep": { "type": "boolean", "description": "Run deep analysis" },
-                "shutdown": { "type": "boolean", "description": "Close MT5 after backtest" },
-                "kill_existing": { "type": "boolean" },
-                "timeout": { "type": "integer" },
-                "gui": { "type": "boolean" }
+                "timeout": { "type": "integer", "description": "Max time in seconds to wait for backtest (default: 900)" },
+                "gui": { "type": "boolean", "description": "Enable visualization during backtest" }
             }
         }
     })

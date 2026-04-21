@@ -12,9 +12,12 @@ pub mod utility;
 
 pub fn get_tools_list() -> Value {
     let tools = vec![
-        // Backtest
-        backtest::tool_run_backtest(),
-        backtest::tool_get_backtest_status(),
+        // Backtest - Granular options
+        backtest::tool_run_backtest(),           // Full pipeline: compile + clean + backtest + extract + analyze
+        backtest::tool_run_backtest_quick(),     // Quick: skip compile, do clean + backtest + extract + analyze
+        backtest::tool_run_backtest_only(),      // Minimal: skip compile, do clean + backtest + extract only
+        backtest::tool_launch_backtest(),        // Fire-and-forget: compile + clean + launch MT5
+        backtest::tool_get_backtest_status(),    // Poll for completion
         backtest::tool_cache_status(),
         backtest::tool_clean_cache(),
         // Optimization

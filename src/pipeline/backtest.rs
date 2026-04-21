@@ -8,7 +8,7 @@ use tokio::time::{sleep, Duration};
 use crate::analytics::{DealAnalyzer, ReportExtractor};
 use crate::compile::MqlCompiler;
 use crate::models::config::Config;
-use crate::models::report::{PipelineMetadata, FilePaths};
+use crate::models::report::{PipelineMetadata, FilePaths, BacktestJob};
 use crate::storage::{ReportDb, ReportEntry};
 
 pub struct BacktestPipeline {
@@ -73,7 +73,7 @@ impl BacktestPipeline {
 
         if !params.skip_compile {
             self.log_progress(&progress_log, "COMPILE").await;
-            self.compile_ea(&params.expert).await?;
+            self.compile_ea(&params.expert, params.timeout).await?;
         }
 
         if !params.skip_clean {
@@ -89,6 +89,13 @@ impl BacktestPipeline {
             &report_path.to_string_lossy(),
             &report_dir.to_string_lossy(),
         )?;
+
+        // Handle case where EA didn't trade - no deals generated
+        if extraction.deals.is_empty() {
+            tracing::warn!("Backtest completed but no deals were generated - EA did not trade during this period");
+            let warning_path = report_dir.join("NO_TRADES_WARNING.txt");
+            let _ = fs::write(&warning_path, "Warning: No deals were generated during this backtest.\nThe EA did not execute any trades during the specified date range.\n");
+        }
 
         // Move equity chart images to OS temp dir, then delete the HTML report.
         let charts_dir = self.relocate_charts(&report_path, &report_id).await;
@@ -108,7 +115,7 @@ impl BacktestPipeline {
         self.log_progress(&progress_log, "DONE").await;
 
         let duration = (chrono::Utc::now() - start_time).num_seconds();
-        self.save_metadata(&params, &report_dir, duration).await?;
+        self.save_metadata(&params, &report_dir, duration, extraction.deals.is_empty()).await?;
 
         // Register in the SQLite report registry.
         self.register_in_db(
@@ -122,12 +129,103 @@ impl BacktestPipeline {
         )
         .await;
 
+        let message = if extraction.deals.is_empty() {
+            "Backtest completed successfully, but EA did not execute any trades during this period".to_string()
+        } else {
+            "Backtest completed successfully".to_string()
+        };
+
         Ok(PipelineResult {
             success: true,
             report_dir,
             duration_seconds: duration,
-            message: "Backtest completed successfully".to_string(),
+            message,
         })
+    }
+
+    /// Launch backtest in fire-and-forget mode: compile, clean, launch MT5, return immediately.
+    /// Returns a BacktestJob that can be used with get_backtest_status to poll for completion.
+    pub async fn launch_backtest(&self, params: BacktestParams) -> Result<BacktestJob> {
+        let _start_time = chrono::Utc::now();
+        let report_id = self.generate_report_id(&params);
+        let report_dir = self.config.reports_dir().join(&report_id);
+
+        fs::create_dir_all(&report_dir)?;
+
+        let progress_log = report_dir.join("progress.log");
+        self.log_progress(&progress_log, "START").await;
+
+        if !params.skip_compile {
+            self.log_progress(&progress_log, "COMPILE").await;
+            self.compile_ea(&params.expert, params.timeout).await?;
+        }
+
+        if !params.skip_clean {
+            self.log_progress(&progress_log, "CLEAN").await;
+            self.clean_cache(&params.expert).await?;
+        }
+
+        self.log_progress(&progress_log, "BACKTEST").await;
+        
+        // Get MT5 paths
+        let mt5_dir = self.config.mt5_dir()
+            .ok_or_else(|| anyhow!("MT5 directory not configured"))?;
+        let wine_exe = self.config.wine_executable.as_ref()
+            .ok_or_else(|| anyhow!("wine_executable not configured"))?;
+        let wine_prefix = mt5_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| anyhow!("Could not determine Wine prefix from terminal_dir"))?;
+        let reports_dir = mt5_dir.join("reports");
+        fs::create_dir_all(&reports_dir)?;
+
+        // Write config files
+        let ini_content = self.build_backtest_ini(&params, &report_id)?;
+        let config_host = wine_prefix.join("drive_c").join("backtest_config.ini");
+        fs::write(&config_host, ini_content.as_bytes())?;
+        self.update_terminal_ini(&params, &report_id)?;
+
+        // Kill any running MT5
+        self.kill_mt5().await?;
+
+        // Launch MT5 (fire and forget)
+        let mut cmd = self.build_wine_launch(wine_exe, &wine_prefix)?;
+        let child = cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+
+        let pid = child.id();
+        tracing::info!("MT5 launched with PID {:?} for backtest {}", pid, report_id);
+
+        // Create and save the job tracking file
+        let expected_report = reports_dir.join(format!("{}.htm", report_id));
+        let job = BacktestJob::new(
+            report_id.clone(),
+            report_dir.to_string_lossy().to_string(),
+            params.expert.clone(),
+            params.symbol.clone(),
+            params.timeframe.clone(),
+            expected_report.to_string_lossy().to_string(),
+            params.timeout,
+        );
+
+        // Save job info for polling
+        let job_path = report_dir.join("job.json");
+        fs::write(&job_path, serde_json::to_string_pretty(&job)?)?;
+
+        // Save initial metadata
+        self.save_metadata(&params, &report_dir, 0, false).await?;
+
+        // Register in DB as "running"
+        let db = ReportDb::new(&Config::db_path());
+        if let Err(e) = db.init() {
+            tracing::warn!("Failed to init report DB: {}", e);
+        }
+
+        Ok(job)
     }
 
     /// Move equity chart images (*.png, *.gif) from MT5's reports dir to OS temp,
@@ -232,7 +330,7 @@ impl BacktestPipeline {
         }
     }
 
-    async fn compile_ea(&self, expert: &str) -> Result<()> {
+    async fn compile_ea(&self, expert: &str, timeout_secs: u64) -> Result<()> {
         let mut search_paths = vec![
             PathBuf::from(&self.config.get("project_dir")).join("src/experts").join(format!("{}.mq5", expert)),
             PathBuf::from(&self.config.get("project_dir")).join("src").join(format!("{}.mq5", expert)),
@@ -252,7 +350,8 @@ impl BacktestPipeline {
             .find(|p| p.exists())
             .ok_or_else(|| anyhow!("Cannot find {}.mq5 — searched project_dir and MT5 Experts dir", expert))?;
 
-        let result = self.compiler.compile(&source_path.to_string_lossy())?;
+        let timeout = std::time::Duration::from_secs(timeout_secs.min(300)); // Max 5 min for compile
+        let result = self.compiler.compile_with_timeout(&source_path.to_string_lossy(), timeout).await?;
         
         if !result.success {
             return Err(anyhow!(
@@ -761,7 +860,7 @@ impl BacktestPipeline {
         let _ = fs::write(log_path, line);
     }
 
-    async fn save_metadata(&self, params: &BacktestParams, report_dir: &Path, duration: i64) -> Result<()> {
+    async fn save_metadata(&self, params: &BacktestParams, report_dir: &Path, duration: i64, no_trades: bool) -> Result<()> {
         let metadata = PipelineMetadata {
             expert: params.expert.clone(),
             symbol: params.symbol.clone(),
@@ -781,6 +880,7 @@ impl BacktestPipeline {
                 deals_csv: report_dir.join("deals.csv").to_string_lossy().to_string(),
                 deals_json: report_dir.join("deals.json").to_string_lossy().to_string(),
             },
+            no_trades,
         };
 
         let json = serde_json::to_string_pretty(&metadata)?;

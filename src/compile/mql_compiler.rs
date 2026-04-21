@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
+use tokio::time::timeout as tokio_timeout;
 
 use crate::models::Config;
 
@@ -28,7 +29,11 @@ impl MqlCompiler {
         Self { config }
     }
 
-    pub fn compile(&self, source_path: &str) -> Result<CompileResult> {
+    pub async fn compile(&self, source_path: &str) -> Result<CompileResult> {
+        self.compile_with_timeout(source_path, Duration::from_secs(120)).await
+    }
+
+    pub async fn compile_with_timeout(&self, source_path: &str, timeout: Duration) -> Result<CompileResult> {
         let source_path = Path::new(source_path);
         if !source_path.exists() {
             return Err(anyhow!("Source file not found: {}", source_path.display()));
@@ -61,7 +66,7 @@ impl MqlCompiler {
         let staged_mq5 = &sync.dest_mq5;
         tracing::info!("Staged {} file(s) to: {}", sync.files_copied, staged_mq5.display());
 
-        self.run_metaeditor(wine_exe, &wine_prefix, &metaeditor, staged_mq5)?;
+        self.run_metaeditor_with_timeout(wine_exe, &wine_prefix, &metaeditor, staged_mq5, timeout).await?;
 
         // /log flag (no path) writes log adjacent to source: {ea_name}.log
         let log_path = staged_mq5.with_extension("log");
@@ -197,15 +202,16 @@ impl MqlCompiler {
         Ok(SyncStats { dest_mq5, files_copied })
     }
 
-    /// Run MetaEditor to compile `source_mq5`.
+    /// Run MetaEditor to compile `source_mq5` with timeout.
     /// Uses Unix host path for /compile: and bare /log flag (writes log adjacent to source).
     /// Shell script intermediary required on macOS to preserve DYLD_* vars past SIP.
-    fn run_metaeditor(
+    async fn run_metaeditor_with_timeout(
         &self,
         wine_exe: &str,
         wine_prefix: &Path,
         metaeditor: &Path,
         source_mq5: &Path,
+        timeout: Duration,
     ) -> Result<()> {
         let mt5_dir = metaeditor.parent().unwrap_or(metaeditor);
 
@@ -242,16 +248,24 @@ impl MqlCompiler {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))?;
             }
-            Command::new("/bin/sh").arg(&script_path).output()?;
+            let compile_future = tokio::process::Command::new("/bin/sh")
+                .arg(&script_path)
+                .output();
+            let result = tokio_timeout(timeout, compile_future).await
+                .map_err(|_| anyhow!("Compilation timed out after {} seconds", timeout.as_secs()))?;
+            result?;
         } else {
-            Command::new(wine_exe)
+            let compile_future = tokio::process::Command::new(wine_exe)
                 .arg(metaeditor)
                 .arg(format!("/compile:{}", source_mq5.display()))
                 .arg("/log")
                 .env("WINEPREFIX", wine_prefix)
                 .env("WINEDEBUG", "-all")
                 .current_dir(mt5_dir)
-                .output()?;
+                .output();
+            let result = tokio_timeout(timeout, compile_future).await
+                .map_err(|_| anyhow!("Compilation timed out after {} seconds", timeout.as_secs()))?;
+            result?;
         }
         Ok(())
     }
