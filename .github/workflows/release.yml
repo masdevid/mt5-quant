@@ -265,33 +265,50 @@ jobs:
       - name: Install mcp-publisher
         id: install-publisher
         run: |
-          # Resolve latest release tag from GitHub API
-          LATEST_TAG=$(curl -sf \
+          # Fetch the download URL for linux_amd64 directly from the release assets API
+          # (asset name format changed in v1.6.0 — look it up rather than constructing it)
+          URL=$(curl -sf \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/modelcontextprotocol/registry/releases/latest" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])" \
-            2>/dev/null || echo "v1.0.0")
+            | python3 -c "
+          import sys, json
+          r = json.load(sys.stdin)
+          tag = r['tag_name']
+          assets = r.get('assets', [])
+          match = next((a['browser_download_url'] for a in assets
+                        if 'linux' in a['name'] and 'amd64' in a['name']
+                        and a['name'].endswith('.tar.gz')
+                        and 'sbom' not in a['name']
+                        and 'sigstore' not in a['name']), None)
+          if match:
+              print(match)
+          else:
+              print(f'https://github.com/modelcontextprotocol/registry/releases/download/{tag}/mcp-publisher_linux_amd64.tar.gz', file=sys.stderr)
+              sys.exit(1)
+          " 2>/dev/null)
 
-          VERSION="${LATEST_TAG#v}"
-          URL="https://github.com/modelcontextprotocol/registry/releases/download/${LATEST_TAG}/mcp-publisher_${VERSION}_linux_amd64.tar.gz"
-          echo "Downloading mcp-publisher ${LATEST_TAG} from: $URL"
-
-          if curl -fsSL -o mcp-publisher.tar.gz "$URL"; then
-            tar -xzf mcp-publisher.tar.gz 2>/dev/null || true
-            BINARY=$(find . -maxdepth 3 -name "mcp-publisher" ! -path "./.git/*" | head -1)
-            if [[ -n "$BINARY" && -f "$BINARY" ]]; then
-              chmod +x "$BINARY"
-              sudo mv "$BINARY" /usr/local/bin/mcp-publisher
-              echo "installed=true" >> "$GITHUB_OUTPUT"
-              echo "Installed: $(mcp-publisher --version 2>/dev/null || echo 'ok')"
+          if [[ -z "$URL" ]]; then
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "Could not resolve mcp-publisher download URL"
+          else
+            echo "Downloading: $URL"
+            if curl -fsSL -o mcp-publisher.tar.gz "$URL"; then
+              tar -xzf mcp-publisher.tar.gz 2>/dev/null || true
+              BINARY=$(find . -maxdepth 3 -name "mcp-publisher" ! -path "./.git/*" | head -1)
+              if [[ -n "$BINARY" && -f "$BINARY" ]]; then
+                chmod +x "$BINARY"
+                sudo mv "$BINARY" /usr/local/bin/mcp-publisher
+                echo "installed=true" >> "$GITHUB_OUTPUT"
+                echo "Installed: $(mcp-publisher --version 2>/dev/null || echo 'ok')"
+              else
+                echo "installed=false" >> "$GITHUB_OUTPUT"
+                echo "Binary not found in archive"
+              fi
+              rm -f mcp-publisher.tar.gz
             else
               echo "installed=false" >> "$GITHUB_OUTPUT"
-              echo "Binary not found in archive"
+              echo "Download failed: $URL"
             fi
-            rm -f mcp-publisher.tar.gz
-          else
-            echo "installed=false" >> "$GITHUB_OUTPUT"
-            echo "Download failed: $URL"
           fi
 
       - name: Validate server.json before publish
