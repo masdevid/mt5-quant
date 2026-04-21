@@ -183,3 +183,32 @@ jobs:
           mcp-publisher publish
           
           echo "✓ Published to MCP Registry"
+
+  release-info:
+    needs: [mcp-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Display Release Commands
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════════╗"
+          echo "║             🎉 RELEASE COMPLETED SUCCESSFULLY! 🎉              ║"
+          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📦 GitHub Release: https://github.com/masdevid/mt5-quant/releases/tag/${{ github.event.inputs.version || github.ref_name }}"
+          echo "📦 MCP Registry: io.github.masdevid/mt5-quant"
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "  MCP CLIENT REGISTRATION COMMANDS"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "▶️  CLAUDE CODE:"
+          echo "   claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant"
+          echo ""
+          echo "▶️  WINDSURF:"
+          echo '   echo \'{"mcpServers": {"io.github.masdevid/mt5-quant": {"command": "~/.local/bin/mt5-quant", "disabled": false, "registry": "io.github.masdevid/mt5-quant"}}}\' >> ~/.codeium/windsurf/mcp_config.json'
+          echo ""
+          echo "▶️  CURSOR / VSCODE:"
+          echo '   mkdir -p ~/.cursor && echo \'{"mcpServers": {"mt5-quant": {"command": "~/.local/bin/mt5-quant"}}}\' > ~/.cursor/mcp.json'
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
