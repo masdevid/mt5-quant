@@ -13,7 +13,7 @@
       "registryType": "mcpbPackageType",
       "version": "1.31.1",
       "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.31.1/mcp-mt5-quant-macos-arm64.tar.gz",
-      "fileSha256": "7a62a6d81111059fdeae0b2e0863bbd7edeed0cf1cc97161e86767fbe9242cdb",
+      "fileSha256": "f7e2137c3d223c1af3fe70cb01ce5575874f98a29f732771f4fb816c1d1a5768",
       "transport": {
         "type": "stdio"
       },
