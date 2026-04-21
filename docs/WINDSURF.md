@@ -27,8 +27,10 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "mt5-quant": {
-      "command": "/Users/masdevid/jobs/mt5-quant/target/release/mt5-quant"
+    "io.github.masdevid/mt5-quant": {
+      "command": "~/.local/bin/mt5-quant",
+      "disabled": false,
+      "registry": "io.github.masdevid/mt5-quant"
     }
   }
 }
@@ -37,6 +39,10 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
 Or use the automated setup:
 
 ```bash
+# Install binary to standard location
+cp target/release/mt5-quant ~/.local/bin/
+
+# Then configure
 bash scripts/setup.sh
 ```
 

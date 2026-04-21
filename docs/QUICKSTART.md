@@ -81,7 +81,7 @@ terminal_dir: "~/Library/Application Support/net.metaquotes.wine.metatrader5/dri
 ### Claude Code
 
 ```bash
-claude mcp add MT5-Quant -- /path/to/mt5-quant/target/release/mt5-quant
+claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant
 ```
 
 Verify:
@@ -96,8 +96,10 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "mt5-quant": {
-      "command": "/path/to/mt5-quant"
+    "io.github.masdevid/mt5-quant": {
+      "command": "~/.local/bin/mt5-quant",
+      "disabled": false,
+      "registry": "io.github.masdevid/mt5-quant"
     }
   }
 }
@@ -111,7 +113,7 @@ Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
 {
   "mcpServers": {
     "mt5-quant": {
-      "command": "/path/to/mt5-quant"
+      "command": "~/.local/bin/mt5-quant"
     }
   }
 }

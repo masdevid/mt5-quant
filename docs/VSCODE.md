@@ -28,7 +28,7 @@ cargo build --release
 2. Run `MCP: Add Server`
 3. Choose **Workspace** or **User** scope
 4. Enter server name: `mt5-quant`
-5. Enter command: Full path to binary (e.g., `/Users/name/mt5-quant/target/release/mt5-quant`)
+5. Enter command: `~/.local/bin/mt5-quant`
 
 ### Method 2: Edit mcp.json Directly
 
@@ -38,7 +38,7 @@ Add to `.vscode/mcp.json` in your workspace:
 {
   "servers": {
     "mt5-quant": {
-      "command": "/absolute/path/to/mt5-quant"
+      "command": "~/.local/bin/mt5-quant"
     }
   }
 }
@@ -52,7 +52,7 @@ cat > .vscode/mcp.json << 'EOF'
 {
   "servers": {
     "mt5-quant": {
-      "command": "/path/to/mt5-quant"
+      "command": "~/.local/bin/mt5-quant"
     }
   }
 }
@@ -62,7 +62,7 @@ EOF
 ### Method 3: VS Code CLI
 
 ```bash
-code --add-mcp '{"name":"mt5-quant","command":"/path/to/mt5-quant"}'
+code --add-mcp '{"name":"mt5-quant","command":"~/.local/bin/mt5-quant"}'
 ```
 
 ## Verify Setup

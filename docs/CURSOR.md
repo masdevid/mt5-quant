@@ -29,7 +29,7 @@ cargo build --release
 3. Click **Add Custom MCP**
 4. Enter:
    - **Name**: `mt5-quant`
-   - **Command**: Full path to binary (e.g., `/Users/name/mt5-quant/target/release/mt5-quant`)
+   - **Command**: `~/.local/bin/mt5-quant`
    - **Type**: `stdio`
 
 ### Method 2: Edit mcp.json Directly
@@ -41,7 +41,7 @@ Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
   "mcpServers": {
     "mt5-quant": {
       "type": "stdio",
-      "command": "/absolute/path/to/mt5-quant"
+      "command": "~/.local/bin/mt5-quant"
     }
   }
 }

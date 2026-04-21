@@ -1024,14 +1024,20 @@ _register_with_platform() {
     local platform="$1"
     local use_binary="${2:-false}"
 
-    # Determine command path (binary for Windsurf/Cursor, Python for Claude)
+    # Determine command path - use standard installation location
     local cmd_path
-    if $use_binary && [[ -f "${REPO_DIR}/target/release/mt5-quant" ]]; then
+    local default_install="$HOME/.local/bin/mt5-quant"
+    
+    if [[ -f "$default_install" ]]; then
+        cmd_path="$default_install"
+    elif [[ -f "${REPO_DIR}/target/release/mt5-quant" ]]; then
+        # Fallback to project build if standard location not found
         cmd_path="${REPO_DIR}/target/release/mt5-quant"
-    elif [[ -f "${REPO_DIR}/mt5-quant" ]]; then
-        cmd_path="${REPO_DIR}/mt5-quant"
+        _warn "Using project build at $cmd_path"
+        _warn "Consider installing to standard location: cp $cmd_path ~/.local/bin/"
     else
-        cmd_path="python3 ${REPO_DIR}/server/main.py"
+        _fail "mt5-quant not found at $default_install or ${REPO_DIR}/target/release/"
+        return 1
     fi
 
     case "$platform" in
@@ -1066,8 +1072,10 @@ if os.path.exists(config_path):
 if 'mcpServers' not in data:
     data['mcpServers'] = {}
 
-data['mcpServers']['mt5-quant'] = {
-    'command': '$cmd_path'
+data['mcpServers']['io.github.masdevid/mt5-quant'] = {
+    'command': '$cmd_path',
+    'disabled': False,
+    'registry': 'io.github.masdevid/mt5-quant'
 }
 
 with open(config_path, 'w') as f:
