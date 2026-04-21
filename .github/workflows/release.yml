@@ -1,0 +1,152 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          mkdir -p dist/mt5-quant-macos
+          cp target/release/mt5-quant dist/mt5-quant-macos/
+          cp -r config dist/mt5-quant-macos/
+          cp README.md dist/mt5-quant-macos/
+          cp -r docs dist/mt5-quant-macos/
+          cd dist
+          tar -czf mt5-quant-macos-arm64.tar.gz mt5-quant-macos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binary
+          path: dist/mt5-quant-macos-arm64.tar.gz
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          mkdir -p dist/mt5-quant-linux
+          cp target/release/mt5-quant dist/mt5-quant-linux/
+          cp -r config dist/mt5-quant-linux/
+          cp README.md dist/mt5-quant-linux/
+          cp -r docs dist/mt5-quant-linux/
+          cd dist
+          tar -czf mt5-quant-linux-x64.tar.gz mt5-quant-linux
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/mt5-quant-linux-x64.tar.gz
+
+  release:
+    needs: [build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-binary
+          path: dist
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/mt5-quant-macos-arm64.tar.gz
+            dist/mt5-quant-linux-x64.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mcp-package:
+    needs: release
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-binary
+          path: dist
+
+      - name: Build MCP package
+        run: |
+          # Create MCP package structure
+          mkdir -p mcp-package/mcp-server/bin
+          
+          # Extract binary from the tar.gz
+          cd dist
+          tar -xzf mt5-quant-macos-arm64.tar.gz
+          cp mt5-quant-macos/mt5-quant ../mcp-package/mcp-server/bin/
+          cd ..
+          
+          # Copy config and docs
+          cp -r config mcp-package/
+          cp -r docs mcp-package/
+          cp README.md mcp-package/
+          cp server.json mcp-package/
+          
+          # Create tar.gz
+          cd mcp-package
+          tar -czf ../mcp-mt5-quant-macos-arm64.tar.gz .
+          cd ..
+          
+          # Calculate SHA256
+          shasum -a 256 mcp-mt5-quant-macos-arm64.tar.gz | awk '{print $1}' > mcp-sha256.txt
+          echo "MCP Package SHA256: $(cat mcp-sha256.txt)"
+
+      - name: Upload MCP package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mcp-mt5-quant-macos-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update server.json SHA256
+        run: |
+          SHA256=$(cat mcp-sha256.txt)
+          echo "Updating server.json with SHA256: $SHA256"
+          # Update server.json with the new SHA256 (this is for reference, actual publish needs mcp-publisher)
+          sed -i.bak "s/PLACEHOLDER_SHA256/$SHA256/g" server.json
+          cat server.json | grep -A2 fileSha256
