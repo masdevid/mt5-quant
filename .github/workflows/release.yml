@@ -169,12 +169,27 @@ jobs:
 
       - name: Install mcp-publisher
         run: |
-          curl -L -o mcp-publisher https://github.com/modelcontextprotocol/mcp-publisher/releases/latest/download/mcp-publisher-linux-amd64
+          # Download mcp-publisher with error handling
+          curl -fsSL -o mcp-publisher https://github.com/modelcontextprotocol/mcp-publisher/releases/latest/download/mcp-publisher-linux-amd64 || {
+            echo "⚠️  Failed to download mcp-publisher - MCP publish will be skipped"
+            echo "Install manually: https://github.com/modelcontextprotocol/mcp-publisher"
+            exit 0
+          }
           chmod +x mcp-publisher
           sudo mv mcp-publisher /usr/local/bin/
 
       - name: Publish to MCP Registry
         run: |
+          # Check if mcp-publisher is available
+          if ! command -v mcp-publisher &> /dev/null; then
+            echo "⚠️  mcp-publisher not found - skipping MCP publish"
+            echo "To publish manually:"
+            echo "  1. Install mcp-publisher: https://github.com/modelcontextprotocol/mcp-publisher"
+            echo "  2. Run: mcp-publisher login github"
+            echo "  3. Run: mcp-publisher publish"
+            exit 0
+          fi
+          
           echo "=== MCP Registry Publish ==="
           # Login with pre-authenticated token
           echo "${{ secrets.MCP_PUBLISH_TOKEN }}" | mcp-publisher login github --token-stdin
