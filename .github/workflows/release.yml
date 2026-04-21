@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.31.0)'
+        required: true
+        type: string
 
 jobs:
   build-macos:
@@ -64,7 +69,6 @@ jobs:
   release:
     needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -82,9 +86,11 @@ jobs:
           name: linux-binary
           path: dist
 
-      - name: Create GitHub Release
+      - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event.inputs.version || github.ref_name }}
           files: |
             dist/mt5-quant-macos-arm64.tar.gz
             dist/mt5-quant-linux-x64.tar.gz
@@ -97,7 +103,6 @@ jobs:
   build-mcp-package:
     needs: release
     runs-on: macos-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -138,15 +143,49 @@ jobs:
       - name: Upload MCP package to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
           files: |
             mcp-mt5-quant-macos-arm64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update server.json SHA256
+      - name: Upload MCP package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-package
+          path: mcp-mt5-quant-macos-arm64.tar.gz
+
+  mcp-publish:
+    needs: build-mcp-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download MCP package
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-package
+          path: .
+
+      - name: Install mcp-publisher
         run: |
-          SHA256=$(cat mcp-sha256.txt)
-          echo "Updating server.json with SHA256: $SHA256"
-          # Update server.json with the new SHA256 (this is for reference, actual publish needs mcp-publisher)
-          sed -i.bak "s/PLACEHOLDER_SHA256/$SHA256/g" server.json
-          cat server.json | grep -A2 fileSha256
+          curl -L -o mcp-publisher https://github.com/modelcontextprotocol/mcp-publisher/releases/latest/download/mcp-publisher-linux-amd64
+          chmod +x mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Authenticate and Publish
+        run: |
+          echo "=== MCP Publish ==="
+          echo "This step requires manual authentication."
+          echo "For CI/CD, use OIDC authentication (requires registry setup)"
+          echo ""
+          echo "To publish manually from local machine:"
+          echo "1. Download the MCP package from the release"
+          echo "2. Run: mcp-publisher login github"
+          echo "3. Run: mcp-publisher publish"
+          echo ""
+          echo "For automated publishing, configure OIDC:"
+          echo "mcp-publisher login github-oidc"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
