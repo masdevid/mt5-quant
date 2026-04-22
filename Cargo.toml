@@ -1,6 +1,6 @@
 [package]
 name = "mt5-quant"
-version = "1.32.0"
+version = "1.32.1"
 edition = "2021"
 description = "MCP server for MT5 strategy development on macOS/Linux"
 authors = ["masdevid <masdevid@example.com>"]
