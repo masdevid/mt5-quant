@@ -67,7 +67,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
 | [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |
 
-## MCP Tools (87)
+## MCP Tools (89)
 
 ### Core workflow
 

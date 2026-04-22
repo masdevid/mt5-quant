@@ -63,6 +63,8 @@ pub fn get_tools_list() -> Value {
         system::tool_list_symbols(),
         system::tool_healthcheck(),
         system::tool_get_active_account(),
+        system::tool_check_update(),
+        system::tool_update(),
         // Utility (8 tools)
         utility::tool_check_symbol_data_status(),
         utility::tool_get_backtest_history(),

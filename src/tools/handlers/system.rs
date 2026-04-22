@@ -3,6 +3,178 @@ use serde_json::{json, Value};
 use std::path::Path;
 use crate::models::Config;
 
+// ── Update helpers ────────────────────────────────────────────────────────────
+
+fn platform_tag() -> &'static str {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))] return "macos-aarch64";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]  return "macos-x86_64";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]  return "linux-x86_64";
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    )))] return "unsupported";
+}
+
+fn semver_newer(latest: &str, current: &str) -> bool {
+    let parse = |s: &str| -> (u32, u32, u32) {
+        let mut p = s.trim_start_matches('v').splitn(3, '.');
+        let ma = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+        let mi = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+        let pa = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+        (ma, mi, pa)
+    };
+    parse(latest) > parse(current)
+}
+
+/// Fetch the latest release tag from GitHub API (5 s timeout via curl).
+/// Returns the version string without the leading "v", or None on failure.
+pub(super) async fn fetch_latest_version() -> Option<String> {
+    let output = tokio::process::Command::new("curl")
+        .args([
+            "-sf", "--max-time", "5",
+            "-H", "Accept: application/vnd.github.v3+json",
+            "-H", "User-Agent: mt5-quant-updater",
+            "https://api.github.com/repos/masdevid/mt5-quant/releases/latest",
+        ])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() { return None; }
+
+    let body: Value = serde_json::from_slice(&output.stdout).ok()?;
+    body.get("tag_name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim_start_matches('v').to_string())
+}
+
+fn ok_response(data: Value) -> Value {
+    json!({ "content": [{ "type": "text", "text": data.to_string() }], "isError": false })
+}
+
+fn err_response(msg: impl std::fmt::Display) -> Value {
+    json!({ "content": [{ "type": "text", "text": msg.to_string() }], "isError": true })
+}
+
+// ── Update tool handlers ──────────────────────────────────────────────────────
+
+pub async fn handle_check_update(_config: &Config) -> Result<Value> {
+    let current = env!("CARGO_PKG_VERSION");
+
+    // Use cached background-check result if available; otherwise fetch now.
+    let latest_opt = match super::LATEST_VERSION.get() {
+        Some(v) => v.clone(),
+        None => fetch_latest_version().await,
+    };
+
+    let Some(latest) = latest_opt else {
+        return Ok(ok_response(json!({
+            "current_version": current,
+            "update_available": false,
+            "error": "Could not reach GitHub API — check network connectivity",
+        })));
+    };
+
+    let update_available = semver_newer(&latest, current);
+    Ok(ok_response(json!({
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": update_available,
+        "hint": if update_available {
+            format!("Run the `update` tool to install v{latest}")
+        } else {
+            "You are on the latest version".to_string()
+        },
+    })))
+}
+
+pub async fn handle_update(_config: &Config) -> Result<Value> {
+    let current = env!("CARGO_PKG_VERSION");
+
+    let latest = match super::LATEST_VERSION.get().and_then(|v| v.as_deref()) {
+        Some(v) => v.to_string(),
+        None => match fetch_latest_version().await {
+            Some(v) => v,
+            None => return Ok(err_response(
+                r#"{"success":false,"error":"Could not determine latest version — check network"}"#
+            )),
+        },
+    };
+
+    if !semver_newer(&latest, current) {
+        return Ok(ok_response(json!({
+            "up_to_date": true,
+            "version": current,
+        })));
+    }
+
+    let tag = platform_tag();
+    if tag == "unsupported" {
+        return Ok(err_response(
+            r#"{"success":false,"error":"Auto-update not supported on this platform — build from source"}"#
+        ));
+    }
+
+    let url = format!(
+        "https://github.com/masdevid/mt5-quant/releases/download/v{latest}/mcp-mt5-quant-{tag}.tar.gz"
+    );
+
+    // Download tarball to a temp file
+    let tmp_tar = tempfile::NamedTempFile::new()?;
+    let dl = tokio::process::Command::new("curl")
+        .args(["-sfL", "--max-time", "120",
+               "-o", tmp_tar.path().to_str().unwrap_or_default(),
+               &url])
+        .status()
+        .await?;
+
+    if !dl.success() {
+        return Ok(err_response(format!(
+            r#"{{"success":false,"error":"Download failed","url":"{}"}}"#, url
+        )));
+    }
+
+    // Extract binary (tarball root dir is mcp-mt5-quant-{platform}/)
+    let tmp_dir = tempfile::tempdir()?;
+    let extract = tokio::process::Command::new("tar")
+        .args(["-xzf", tmp_tar.path().to_str().unwrap_or_default(),
+               "-C", tmp_dir.path().to_str().unwrap_or_default(),
+               "--strip-components=1"])
+        .status()
+        .await?;
+
+    if !extract.success() {
+        return Ok(err_response(r#"{"success":false,"error":"Failed to extract archive"}"#));
+    }
+
+    let new_bin = tmp_dir.path().join("mt5-quant");
+    if !new_bin.exists() {
+        return Ok(err_response(r#"{"success":false,"error":"Binary not found in archive"}"#));
+    }
+
+    // Atomic replace: write to sibling .tmp, then rename (safe on same FS)
+    let current_exe = std::env::current_exe()?;
+    let tmp_dest = current_exe.with_extension("update_tmp");
+    std::fs::copy(&new_bin, &tmp_dest)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_dest, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    std::fs::rename(&tmp_dest, &current_exe)?;
+
+    Ok(ok_response(json!({
+        "success": true,
+        "previous_version": current,
+        "updated_to": latest,
+        "binary": current_exe.to_string_lossy(),
+        "hint": format!("Updated to v{latest}. Restart the MCP connection to load the new binary."),
+    })))
+}
+
 pub async fn handle_verify_setup(config: &Config) -> Result<Value> {
     let mut checks = serde_json::Map::new();
     let mut all_ok = true;

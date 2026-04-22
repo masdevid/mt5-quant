@@ -2,6 +2,8 @@ use anyhow::Result;
 use chrono::Datelike;
 use serde_json::{json, Value};
 use std::path::Path;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::models::Config;
 
 mod system;
@@ -12,6 +14,13 @@ mod analysis;
 mod setfiles;
 mod reports;
 mod utility;
+
+/// Cached result of the background update check.
+/// - Not yet initialized: check still in flight (or not spawned yet)
+/// - Some(version): a newer version is available
+/// - None: already on latest, or GitHub unreachable
+pub(crate) static LATEST_VERSION: OnceLock<Option<String>> = OnceLock::new();
+static BACKGROUND_CHECK_SPAWNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 pub struct ToolHandler {
@@ -24,12 +33,22 @@ impl ToolHandler {
     }
 
     pub async fn handle(&self, name: &str, args: &Value) -> Result<Value> {
+        // Spawn a one-shot background update check on the very first tool call of the session.
+        if !BACKGROUND_CHECK_SPAWNED.swap(true, Ordering::Relaxed) {
+            tokio::spawn(async {
+                let result = system::fetch_latest_version().await;
+                let _ = LATEST_VERSION.set(result);
+            });
+        }
+
         match name {
             // System handlers
-            "verify_setup" => system::handle_verify_setup(&self.config).await,
-            "list_symbols" => system::handle_list_symbols(&self.config).await,
-            "healthcheck" => system::handle_healthcheck(&self.config, args).await,
+            "verify_setup"    => system::handle_verify_setup(&self.config).await,
+            "list_symbols"    => system::handle_list_symbols(&self.config).await,
+            "healthcheck"     => system::handle_healthcheck(&self.config, args).await,
             "get_active_account" => system::handle_get_active_account(&self.config).await,
+            "check_update"    => system::handle_check_update(&self.config).await,
+            "update"          => system::handle_update(&self.config).await,
             
             // Expert/Indicator/Script handlers
             "list_experts" => experts::handle_list_experts(&self.config, args).await,
