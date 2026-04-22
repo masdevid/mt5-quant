@@ -111,6 +111,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | `get_backtest_status` | Poll running backtest status (MT5 running, report found, elapsed time) |
 | `run_optimization` | Genetic optimization (background, returns immediately) |
 | `get_optimization_results` | Parse optimization results after MT5 finishes |
+| `list_jobs` | List all optimization jobs with status |
 | `analyze_report` | Read `analysis.json` from any report directory |
 | `compare_baseline` | Compare report vs baseline, return winner/loser verdict |
 | `compile_ea` | Compile MQL5 EA via MetaEditor |
@@ -118,6 +119,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | `list_indicators` | List all indicators in MQL5/Indicators directory |
 | `list_scripts` | List all scripts in MQL5/Scripts directory |
 | `healthcheck` | Quick server health check |
+| `list_symbols` | List all available symbols in MT5 terminal |
 
 ### Granular Analytics (individual analysis)
 
@@ -174,6 +176,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `get_comparable_reports` | Find comparable reports (same EA/symbol/timeframe) |
 | `tail_log` | Read last N lines of any log; `filter=errors` to see only failures |
 | `prune_reports` | Delete old report directories, keep last N (skips `_opt` dirs) |
+| `promote_to_baseline` | Write a history entry or report to `baseline.json` for compare_baseline |
 
 ### History & baseline
 
@@ -183,7 +186,6 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `archive_all_reports` | Bulk-archive all report dirs then optionally delete them; keeps N newest safe |
 | `get_history` | Query history with filters (EA, symbol, verdict, profit, DD) and sort options |
 | `annotate_history` | Attach verdict / notes / tags to any history entry |
-| `promote_to_baseline` | Write a history entry or report to `baseline.json` for compare_baseline |
 
 ### Cache management
 
@@ -214,6 +216,8 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 | `validate_mt5_config` | Validate terminal.ini and tester configuration files |
 | `get_wine_prefix_info` | Get Wine prefix details: Windows version, installed programs, registry |
 | `get_backtest_crash_info` | Investigate backtest failures: incomplete markers, missing deals.csv, errors |
+| `check_update` | Check if a newer version of MT5-Quant is available |
+| `update` | Update MT5-Quant to latest release |
 
 ### Project Management
 
