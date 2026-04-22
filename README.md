@@ -13,14 +13,19 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 ## Why MT5-Quant
 
-| | MT5-Quant | Other MT5 MCPs | QuantConnect |
+**Focus:** Backtest organization, reporting, and analytics — capabilities MT5 itself doesn't provide.
+
+| | MT5-Quant | Others | QuantConnect |
 |---|---|---|---|
-| Backtest pipeline | ✅ Full | ❌ | Cloud only |
-| Deal-level analytics | ✅ 15+ dims | ❌ | ❌ |
-| MQL5 compilation | ✅ | ❌ | ❌ |
-| macOS/Linux native | ✅ | Windows only | Cloud |
-| Optimization | ✅ Background | ❌ | ✅ Paid |
-| Crash debugging | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
+| **Platform** | macOS/Linux native | Windows only | Cloud only |
+| **Backtest pipeline** | ✅ Full (compile → run → analyze) | ✅ Via MT5 Python package | ❌ |
+| **Deal-level analytics** | ✅ 15+ dimensions | ❌ | ❌ |
+| **Report organization** | ✅ SQLite + search + history | ❌ | ❌ |
+| **MQL5 compilation** | ✅ Headless (MetaEditor via Wine, no GUI) | ⚠️ Via GUI or terminal | ❌ |
+| **Optimization** | ✅ Background + results parsing | ❌ | ✅ Paid |
+| **Crash debugging** | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
+
+**Others** typically run on Windows using the [MetaTrader5 Python package](https://pypi.org/project/MetaTrader5/), providing full terminal operations. MT5-Quant fills the gap: **organizing backtest reports, extracting deal-level insights, and managing optimization workflows** — none of which MT5 or its Python API expose natively.
 
 ## Why Rust
 
@@ -35,7 +40,7 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 **Why this matters for trading:**
 - **No garbage collection** — Process 100k+ deal rows without GC pauses during live analysis
-- **Async via Tokio** — Run 50 concurrent backtest analyses on a thread pool
+- **Async via Tokio** — Handle multiple tool calls concurrently (poll status while streaming logs)
 - **Cross-platform** — Same source compiles to native macOS arm64 and Linux x86_64
 - **Type-safe pipelines** — MQL5 compilation, Wine path handling, SQLite queries: all checked at compile time
 
