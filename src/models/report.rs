@@ -14,8 +14,6 @@ pub struct Report {
     pub from_date: String,
     pub to_date: String,
     pub metrics_file: PathBuf,
-    pub deals_csv: PathBuf,
-    pub deals_json: PathBuf,
     pub analysis_file: Option<PathBuf>,
 }
 
@@ -42,8 +40,6 @@ pub struct PipelineMetadata {
 pub struct FilePaths {
     pub metrics: String,
     pub analysis: String,
-    pub deals_csv: String,
-    pub deals_json: String,
 }
 
 #[allow(dead_code)]

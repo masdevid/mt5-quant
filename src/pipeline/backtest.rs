@@ -258,6 +258,27 @@ impl BacktestPipeline {
         let timeout_secs = params.timeout;
         let report_id_clone = report_id.clone();
         let notification_callback = self.notification_callback.clone();
+        let config_clone = self.config.clone();
+        let params_clone = BacktestParams {
+            expert: params.expert.clone(),
+            symbol: params.symbol.clone(),
+            from_date: params.from_date.clone(),
+            to_date: params.to_date.clone(),
+            timeframe: params.timeframe.clone(),
+            deposit: params.deposit,
+            model: params.model,
+            leverage: params.leverage,
+            set_file: params.set_file.clone(),
+            skip_compile: params.skip_compile,
+            skip_clean: params.skip_clean,
+            skip_analyze: params.skip_analyze,
+            deep_analyze: params.deep_analyze,
+            shutdown: params.shutdown,
+            kill_existing: params.kill_existing,
+            timeout: params.timeout,
+            gui: params.gui,
+            startup_delay_secs: params.startup_delay_secs,
+        };
         tokio::spawn(async move {
             Self::monitor_backtest_completion(
                 report_dir_clone,
@@ -265,10 +286,76 @@ impl BacktestPipeline {
                 timeout_secs,
                 report_id_clone,
                 notification_callback,
+                config_clone,
+                params_clone,
             ).await;
         });
 
         Ok(job)
+    }
+
+    /// Extract deals from a completed report and store them in the DB.
+    async fn extract_and_store(
+        report_path: &Path,
+        report_dir: &Path,
+        report_id: &str,
+        config: &Config,
+        params: &BacktestParams,
+    ) {
+        let extractor = ReportExtractor::new();
+        let start_time = chrono::Utc::now();
+        match extractor.extract(
+            &report_path.to_string_lossy(),
+            &report_dir.to_string_lossy(),
+        ) {
+            Ok(extraction) => {
+                let duration = (chrono::Utc::now() - start_time).num_seconds();
+                let db = ReportDb::new(&Config::db_path());
+                if db.init().is_err() {
+                    tracing::warn!("launch_backtest: failed to init DB for {}", report_id);
+                    return;
+                }
+                let entry = ReportEntry {
+                    id: report_id.to_string(),
+                    expert: params.expert.clone(),
+                    symbol: params.symbol.clone(),
+                    timeframe: params.timeframe.clone(),
+                    model: params.model as i64,
+                    from_date: params.from_date.clone(),
+                    to_date: params.to_date.clone(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    set_file_original: params.set_file.clone(),
+                    set_snapshot_path: None,
+                    report_dir: report_dir.to_string_lossy().to_string(),
+                    charts_dir: None,
+                    net_profit: Some(extraction.metrics.net_profit),
+                    profit_factor: Some(extraction.metrics.profit_factor),
+                    max_dd_pct: Some(extraction.metrics.max_dd_pct),
+                    sharpe_ratio: Some(extraction.metrics.sharpe_ratio),
+                    total_trades: Some(extraction.metrics.total_trades as i64),
+                    win_rate_pct: Some(extraction.metrics.win_rate_pct),
+                    recovery_factor: Some(extraction.metrics.recovery_factor),
+                    deposit: Some(params.deposit as f64),
+                    currency: config.backtest_currency.clone(),
+                    leverage: Some(params.leverage as i64),
+                    duration_seconds: Some(duration),
+                    tags: Vec::new(),
+                    notes: None,
+                    verdict: None,
+                };
+                if let Err(e) = db.insert(&entry) {
+                    tracing::warn!("launch_backtest: failed to register report in DB: {}", e);
+                    return;
+                }
+                if let Err(e) = db.insert_deals(report_id, &extraction.deals) {
+                    tracing::warn!("launch_backtest: failed to store deals in DB: {}", e);
+                }
+                tracing::info!("launch_backtest: extracted {} deals for {}", extraction.deals.len(), report_id);
+            }
+            Err(e) => {
+                tracing::warn!("launch_backtest: extraction failed for {}: {}", report_id, e);
+            }
+        }
     }
 
     /// Background task to monitor backtest completion and update status file.
@@ -278,6 +365,8 @@ impl BacktestPipeline {
         timeout_secs: u64,
         report_id: String,
         notification_callback: Option<NotificationCallback>,
+        config: Config,
+        params: BacktestParams,
     ) {
         let start = tokio::time::Instant::now();
         let deadline = start + Duration::from_secs(timeout_secs);
@@ -292,6 +381,8 @@ impl BacktestPipeline {
                 let candidate = expected_report.with_extension(ext.trim_start_matches('.'));
                 if candidate.exists() {
                     tracing::info!("Backtest {} completed: report found at {}", report_id, candidate.display());
+                    Self::extract_and_store(&candidate, &report_dir, &report_id, &config, &params).await;
+                    let _ = fs::remove_file(&candidate);
                     Self::update_job_status(&report_dir, "completed", Some(candidate.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
                         callback("backtest_completed", json!({
@@ -312,6 +403,8 @@ impl BacktestPipeline {
                 // MT5 exited without report - check for any newer report
                 if let Some(path) = Self::find_newest_report(expected_report.parent().unwrap(), poll_start) {
                     tracing::info!("Backtest {} completed: found fallback report {}", report_id, path.display());
+                    Self::extract_and_store(&path, &report_dir, &report_id, &config, &params).await;
+                    let _ = fs::remove_file(&path);
                     Self::update_job_status(&report_dir, "completed", Some(path.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
                         callback("backtest_completed", json!({
@@ -1047,8 +1140,6 @@ impl BacktestPipeline {
             files: FilePaths {
                 metrics: report_dir.join("metrics.json").to_string_lossy().to_string(),
                 analysis: report_dir.join("analysis.json").to_string_lossy().to_string(),
-                deals_csv: report_dir.join("deals.csv").to_string_lossy().to_string(),
-                deals_json: report_dir.join("deals.json").to_string_lossy().to_string(),
             },
             no_trades,
         };

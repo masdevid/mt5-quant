@@ -289,7 +289,7 @@ pub fn tool_get_wine_prefix_info() -> Value {
 pub fn tool_get_backtest_crash_info() -> Value {
     json!({
         "name": "get_backtest_crash_info",
-        "description": "Investigate backtest crashes/failures. Checks for incomplete markers, missing deals.csv, error logs. Can scan recent reports.",
+        "description": "Investigate backtest crashes/failures. Checks for incomplete markers, missing metrics.json, DB deal count, error logs. Can scan recent reports.",
         "inputSchema": {
             "type": "object",
             "properties": {

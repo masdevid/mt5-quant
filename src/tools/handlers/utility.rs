@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use crate::models::Config;
+use crate::storage::ReportDb;
 
 /// Validate that `user_path` resolves to a location within `allowed_base`.
 /// Returns the canonicalized absolute path on success.
@@ -785,7 +786,6 @@ pub async fn handle_export_report(_config: &Config, args: &Value) -> Result<Valu
     
     let path = Path::new(report_dir);
     let metrics_path = path.join("metrics.json");
-    let _deals_path = path.join("deals.csv");
     
     // Read metrics
     let metrics: Value = if metrics_path.exists() {
@@ -1640,21 +1640,33 @@ pub async fn handle_get_backtest_crash_info(config: &Config, args: &Value) -> Re
                 }
             }
             
-            // Check if deals.csv is missing or empty
-            let deals_csv = path.join("deals.csv");
-            if !deals_csv.exists() {
-                result["crashes_found"].as_array_mut().unwrap().push(json!({
-                    "report_dir": dir,
-                    "type": "missing_deals",
-                    "reason": "deals.csv not found - backtest likely failed",
-                }));
-            } else if let Ok(meta) = deals_csv.metadata() {
-                if meta.len() < 100 {
-                    result["crashes_found"].as_array_mut().unwrap().push(json!({
-                        "report_dir": dir,
-                        "type": "empty_deals",
-                        "reason": "deals.csv is nearly empty - no trades were made",
-                    }));
+            // Check deal count in DB
+            let db = ReportDb::new(&Config::db_path());
+            if db.init().is_ok() {
+                match db.get_by_report_dir(dir) {
+                    Ok(Some(entry)) => {
+                        let deal_count = db.get_deals(&entry.id)
+                            .map(|d| d.len())
+                            .unwrap_or(0);
+                        if deal_count == 0 {
+                            result["crashes_found"].as_array_mut().unwrap().push(json!({
+                                "report_dir": dir,
+                                "type": "empty_deals",
+                                "reason": "No deals stored in DB - EA did not trade or extraction failed",
+                            }));
+                        }
+                    }
+                    Ok(None) | Err(_) => {
+                        // Not in DB at all means extraction never completed
+                        let metrics_exists = path.join("metrics.json").exists();
+                        if !metrics_exists {
+                            result["crashes_found"].as_array_mut().unwrap().push(json!({
+                                "report_dir": dir,
+                                "type": "missing_deals",
+                                "reason": "Report not found in DB and no metrics.json - backtest likely crashed before extraction",
+                            }));
+                        }
+                    }
                 }
             }
         }
@@ -1676,10 +1688,10 @@ pub async fn handle_get_backtest_crash_info(config: &Config, args: &Value) -> Re
                             if let Ok(modified) = meta.modified() {
                                 if modified >= cutoff {
                                     // Check for failure indicators
-                                    let has_deals = path.join("deals.csv").exists();
+                                    let has_metrics = path.join("metrics.json").exists();
                                     let has_incomplete = path.join(".incomplete").exists();
-                                    
-                                    if !has_deals || has_incomplete {
+
+                                    if !has_metrics || has_incomplete {
                                         failures += 1;
                                     }
                                 }
@@ -1701,7 +1713,7 @@ pub async fn handle_get_backtest_crash_info(config: &Config, args: &Value) -> Re
         
         if types.contains(&"missing_deals".to_string()) {
             result["common_patterns"].as_array_mut().unwrap().push(
-                json!("Missing deals.csv suggests MT5 crashed during backtest")
+                json!("Report not in DB and no metrics.json suggests MT5 crashed before extraction completed")
             );
         }
         if types.contains(&"incomplete".to_string()) {

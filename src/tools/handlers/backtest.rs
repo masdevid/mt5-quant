@@ -355,7 +355,6 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     
     // Check for completed artifacts
     let metrics_exists = report_path.join("metrics.json").exists();
-    let deals_exists = report_path.join("deals.csv").exists();
     let is_complete = stage == "DONE" || (report_found && metrics_exists);
     
     // Calculate elapsed time if job exists
@@ -400,7 +399,6 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
             "mt5_running": mt5_running,
             "report_found": report_found,
             "metrics_extracted": metrics_exists,
-            "deals_extracted": deals_exists,
             "elapsed_seconds": elapsed_seconds,
             "message": message,
             "job": job.map(|j| {
