@@ -57,7 +57,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 {
   "mcpServers": {
     "mt5-quant": {
-      "command": "/Users/name/mt5-quant/target/release/mt5-quant"
+      "command": "/Users/name/mt5-quant/mt5-quant"
     },
     "github": {
       "command": "npx",
@@ -70,6 +70,10 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 }
 ```
 
+**Path notes:**
+- Prebuilt binary: `/Users/name/mt5-quant/mt5-quant` (extracted from release tarball)
+- Dev build: `/Users/name/mt5-quant/target/release/mt5-quant` (after `cargo build --release`)
+
 ## Environment Variables
 
 Claude Desktop supports `${env:VAR_NAME}` syntax for environment variable substitution:
@@ -78,7 +82,7 @@ Claude Desktop supports `${env:VAR_NAME}` syntax for environment variable substi
 {
   "mcpServers": {
     "mt5-quant": {
-      "command": "/Users/name/mt5-quant/target/release/mt5-quant",
+      "command": "/Users/name/mt5-quant/mt5-quant",
       "env": {
         "MT5_MCP_HOME": "${env:HOME}/.config/mt5-quant"
       }
