@@ -2,15 +2,7 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** This file documents 56 of 89 total tools. Missing:
-> - `list_experts`, `list_indicators`, `list_scripts`
-> - `healthcheck`, `list_symbols`
-> - Reports query: `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`, `get_report_by_id`, `get_reports_summary`, `get_best_reports`, `search_reports_by_tags`, `search_reports_by_date_range`, `search_reports_by_notes`, `get_reports_by_set_file`, `get_comparable_reports`
-> - Granular analytics: `analyze_monthly_pnl`, `analyze_drawdown_events`, `analyze_top_losses`, `analyze_loss_sequences`, `analyze_position_pairs`, `analyze_direction_bias`, `analyze_streaks`, `analyze_concurrent_peak`
-> - Deal analytics: `list_deals`, `search_deals_by_comment`, `search_deals_by_magic`, `analyze_profit_distribution`, `analyze_time_performance`, `analyze_hold_time_distribution`, `analyze_layer_performance`, `analyze_volume_vs_profit`, `analyze_costs`, `analyze_efficiency`
-> - Archive/history tools: `archive_report`, `archive_all_reports`, `get_history`, `annotate_history`, `promote_to_baseline`
-> - Experts search: `search_experts`, `search_indicators`, `search_scripts`, `copy_indicator_to_project`, `copy_script_to_project`
-> - Debugging/diagnostics: `diagnose_wine`, `get_mt5_logs`, `search_mt5_errors`, `check_mt5_process`, `kill_mt5_process`, `check_system_resources`, `validate_mt5_config`, `get_wine_prefix_info`, `get_backtest_crash_info`
+> **Documentation Status:** All 89 tools are documented.
 
 ---
 
@@ -2009,6 +2001,1688 @@ set_from_optimization(                  → map results[0].params → clean back
   params=results[0].params,
   template=MyEA_base.set                → fills non-swept params from existing file
 )
+```
+
+---
+
+## `list_symbols`
+
+List all available symbols in the MT5 terminal.
+
+**When to call:** To verify a symbol is available before running backtests, or to discover available symbols.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  symbols: Array<{
+    name: string;          // e.g. "XAUUSD", "EURUSD"
+    description?: string;   // Symbol description
+    visible: boolean;       // Whether symbol is visible in Market Watch
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `check_update`
+
+Check if a newer version of MT5-Quant is available on GitHub.
+
+**When to call:** Periodically to stay up to date with the latest features and fixes.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  current_version: string;  // Current version, e.g. "1.31.5"
+  latest_version: string;   // Latest version from GitHub releases
+  update_available: boolean;
+  download_url?: string;    // URL to latest release if update available
+  release_notes?: string;   // Release notes from latest version
+  error?: string;
+}
+```
+
+---
+
+## `update`
+
+Update MT5-Quant to the latest version from GitHub releases.
+
+**When to call:** After `check_update` indicates a newer version is available.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  message: string;          // Update status message
+  new_version: string;      // Version installed
+  error?: string;
+}
+```
+
+---
+
+## `healthcheck`
+
+Quick server health check to verify the MCP server is running.
+
+**When to call:** To verify the server is responsive after installation or configuration changes.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  version: string;          // MT5-Quant version
+  status: "healthy" | "unhealthy";
+  uptime_seconds: number;
+  error?: string;
+}
+```
+
+---
+
+## `list_experts`
+
+List all Expert Advisors (EAs) in the MQL5/Experts directory.
+
+**When to call:** To discover available EAs before running backtests.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  experts: Array<{
+    name: string;           // EA name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `list_indicators`
+
+List all indicators in the MQL5/Indicators directory.
+
+**When to call:** To discover available indicators for use in projects.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  indicators: Array<{
+    name: string;           // Indicator name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `list_scripts`
+
+List all scripts in the MQL5/Scripts directory.
+
+**When to call:** To discover available scripts for one-time execution.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  scripts: Array<{
+    name: string;           // Script name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_experts`
+
+Search EAs by name pattern across all directories.
+
+**When to call:** To find EAs matching a specific pattern when the exact name is unknown.
+
+### Input schema
+
+```typescript
+{
+  pattern: string;          // Search pattern, e.g. "Grid" or "v1."
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  matches: Array<{
+    name: string;           // EA name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_indicators`
+
+Search indicators by name pattern.
+
+**When to call:** To find indicators matching a specific pattern.
+
+### Input schema
+
+```typescript
+{
+  pattern: string;          // Search pattern
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  matches: Array<{
+    name: string;           // Indicator name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_scripts`
+
+Search scripts by name pattern.
+
+**When to call:** To find scripts matching a specific pattern.
+
+### Input schema
+
+```typescript
+{
+  pattern: string;          // Search pattern
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  matches: Array<{
+    name: string;           // Script name without extension
+    path: string;           // Full path to .mq5 file
+    has_ex5: boolean;      // Whether compiled .ex5 exists
+    modified: string;       // Last modified timestamp
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `copy_indicator_to_project`
+
+Copy indicator to project directory.
+
+**When to call:** To include an indicator in your EA project.
+
+### Input schema
+
+```typescript
+{
+  indicator_name: string;   // Name of indicator to copy
+  project_dir: string;     // Target project directory path
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  source_path: string;     // Original indicator path
+  target_path: string;     // Copied indicator path
+  error?: string;
+}
+```
+
+---
+
+## `copy_script_to_project`
+
+Copy script to project directory.
+
+**When to call:** To include a script in your EA project.
+
+### Input schema
+
+```typescript
+{
+  script_name: string;      // Name of script to copy
+  project_dir: string;     // Target project directory path
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  source_path: string;     // Original script path
+  target_path: string;     // Copied script path
+  error?: string;
+}
+```
+
+---
+
+## `diagnose_wine`
+
+Check Wine installation, version, and prefix health.
+
+**When to call:** When experiencing Wine-related issues or to verify Wine setup.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  wine_found: boolean;
+  wine_path?: string;
+  wine_version?: string;
+  prefix_path?: string;
+  prefix_health: "healthy" | "corrupted" | "missing";
+  error?: string;
+}
+```
+
+---
+
+## `get_mt5_logs`
+
+Get MT5 terminal, tester, or MetaEditor logs with filtering.
+
+**When to call:** To diagnose backtest failures or compile errors.
+
+### Input schema
+
+```typescript
+{
+  log_type: "terminal" | "tester" | "metaeditor";
+  lines?: number;           // Number of lines to retrieve (default: 100)
+  filter?: "all" | "errors" | "warnings"; // Default: "all"
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  log_path: string;
+  lines: Array<{
+    timestamp: string;
+    level: "info" | "warning" | "error";
+    message: string;
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_mt5_errors`
+
+Search logs for error patterns (crash, exception, access violation).
+
+**When to call:** To quickly find crash causes in logs.
+
+### Input schema
+
+```typescript
+{
+  log_type: "terminal" | "tester" | "metaeditor" | "all";
+  patterns?: string[];      // Custom error patterns (default: common MT5 errors)
+  max_results?: number;     // Maximum error entries to return (default: 50)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  errors: Array<{
+    timestamp: string;
+    log_type: string;
+    message: string;
+    context?: string;      // Surrounding lines for context
+  }>;
+  total_found: number;
+  error?: string;
+}
+```
+
+---
+
+## `check_mt5_process`
+
+Check if MT5 processes are running, get PID, CPU, memory usage.
+
+**When to call:** To verify MT5 is running or to check for stuck processes.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  processes: Array<{
+    pid: number;
+    name: string;           // "terminal64.exe" or "metatester64.exe"
+    cpu_percent: number;
+    memory_mb: number;
+    uptime_seconds: number;
+    status: "running" | "zombie" | "stopped";
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `kill_mt5_process`
+
+Kill stuck MT5 processes.
+
+**When to call:** When MT5 is stuck or hung and needs to be terminated.
+
+### Input schema
+
+```typescript
+{
+  pid?: number;            // Specific PID to kill (optional, kills all if omitted)
+  force?: boolean;         // Force kill wineserver too (default: false)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  killed_pids: number[];
+  message: string;
+  error?: string;
+}
+```
+
+---
+
+## `check_system_resources`
+
+Check disk space, memory, CPU availability.
+
+**When to call:** Before running long optimizations to ensure sufficient resources.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  disk: {
+    path: string;
+    total_gb: number;
+    free_gb: number;
+    used_percent: number;
+  };
+  memory: {
+    total_mb: number;
+    free_mb: number;
+    used_percent: number;
+  };
+  cpu: {
+    cores: number;
+    usage_percent: number;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `validate_mt5_config`
+
+Validate terminal.ini and tester configuration files.
+
+**When to call:** When experiencing configuration-related backtest failures.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required (auto-detects config paths)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  terminal_ini: {
+    path: string;
+    valid: boolean;
+    issues?: string[];
+  };
+  tester_ini?: {
+    path: string;
+    valid: boolean;
+    issues?: string[];
+  };
+  error?: string;
+}
+```
+
+---
+
+## `get_wine_prefix_info`
+
+Get Wine prefix details: Windows version, installed programs, registry.
+
+**When to call:** To diagnose Wine prefix issues or verify Wine setup.
+
+### Input schema
+
+```typescript
+{
+  // No inputs required
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  prefix_path: string;
+  windows_version: string;
+  installed_programs: string[];
+  registry_keys?: Array<{
+    key: string;
+    value: string;
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `get_backtest_crash_info`
+
+Investigate backtest failures: incomplete markers, missing deals.csv, errors.
+
+**When to call:** When a backtest fails unexpectedly.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;       // Path to the failed backtest report directory
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  status: "complete" | "incomplete" | "crashed" | "missing";
+  issues: Array<{
+    type: string;
+    message: string;
+    severity: "error" | "warning";
+  }>;
+  error_log?: string;
+  error?: string;
+}
+```
+
+---
+
+## `get_latest_report`
+
+Get most recent report with optional equity chart.
+
+**When to call:** To quickly access the latest backtest results.
+
+### Input schema
+
+```typescript
+{
+  include_chart?: boolean;  // Include equity chart data (default: false)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  report: {
+    id: string;
+    report_dir: string;
+    ea: string;
+    symbol: string;
+    timeframe: string;
+    from_date: string;
+    to_date: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+      total_trades: number;
+    };
+    equity_chart?: Array<{date: string; equity: number}>;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `search_reports`
+
+Find reports by EA, symbol, date range, or profit criteria.
+
+**When to call:** To find specific reports matching criteria.
+
+### Input schema
+
+```typescript
+{
+  ea?: string;
+  symbol?: string;
+  from_date?: string;      // "YYYY-MM-DD"
+  to_date?: string;        // "YYYY-MM-DD"
+  min_profit?: number;
+  max_profit?: number;
+  min_profit_factor?: number;
+  max_dd_pct?: number;
+  limit?: number;          // Max results (default: 50)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    ea: string;
+    symbol: string;
+    timeframe: string;
+    from_date: string;
+    to_date: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+      total_trades: number;
+    };
+  }>;
+  total: number;
+  error?: string;
+}
+```
+
+---
+
+## `get_report_by_id`
+
+Get specific report by ID with equity chart.
+
+**When to call:** To retrieve a specific report's full details.
+
+### Input schema
+
+```typescript
+{
+  report_id: string;       // Report directory basename
+  include_chart?: boolean;  // Include equity chart data (default: false)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  report: {
+    id: string;
+    report_dir: string;
+    ea: string;
+    symbol: string;
+    timeframe: string;
+    from_date: string;
+    to_date: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+      total_trades: number;
+      sharpe_ratio: number;
+      recovery_factor: number;
+      win_rate_pct: number;
+    };
+    equity_chart?: Array<{date: string; equity: number}>;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `get_reports_summary`
+
+Aggregate stats: counts, averages, pass rates.
+
+**When to call:** To get overview statistics across all reports.
+
+### Input schema
+
+```typescript
+{
+  ea?: string;             // Filter by EA
+  symbol?: string;         // Filter by symbol
+  from_date?: string;      // Filter by date range
+  to_date?: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  summary: {
+    total_reports: number;
+    avg_profit: number;
+    avg_profit_factor: number;
+    avg_dd_pct: number;
+    profitable_count: number;
+    pass_rate_pct: number;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `get_best_reports`
+
+Top N reports sorted by any metric (profit factor, drawdown, etc.).
+
+**When to call:** To find the best performing reports.
+
+### Input schema
+
+```typescript
+{
+  sort_by: "net_profit" | "profit_factor" | "sharpe_ratio" | "recovery_factor" | "win_rate_pct";
+  order: "desc" | "asc";  // Default: "desc"
+  limit?: number;          // Max results (default: 10)
+  ea?: string;
+  symbol?: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    ea: string;
+    symbol: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+      sharpe_ratio: number;
+      recovery_factor: number;
+      win_rate_pct: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_reports_by_tags`
+
+Find reports by tags.
+
+**When to call:** To find reports tagged with specific keywords.
+
+### Input schema
+
+```typescript
+{
+  tags: string[];          // Tags to search for
+  match_all?: boolean;     // Require all tags (default: false)
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    tags: string[];
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_reports_by_date_range`
+
+Query by backtest date range.
+
+**When to call:** To find reports from a specific time period.
+
+### Input schema
+
+```typescript
+{
+  from_date: string;       // "YYYY-MM-DD"
+  to_date: string;         // "YYYY-MM-DD"
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    timestamp: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `search_reports_by_notes`
+
+Full-text search in report notes.
+
+**When to call:** To find reports with specific notes.
+
+### Input schema
+
+```typescript
+{
+  query: string;           // Search query
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    notes: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `get_reports_by_set_file`
+
+Find all reports using a specific .set file.
+
+**When to call:** To see all backtests run with a specific parameter set.
+
+### Input schema
+
+```typescript
+{
+  set_file: string;        // .set file name (without path)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    set_file: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `get_comparable_reports`
+
+Find comparable reports (same EA/symbol/timeframe).
+
+**When to call:** To find reports for comparison/analysis.
+
+### Input schema
+
+```typescript
+{
+  ea: string;
+  symbol: string;
+  timeframe?: string;     // Optional, uses default if omitted
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  reports: Array<{
+    id: string;
+    report_dir: string;
+    from_date: string;
+    to_date: string;
+    metrics: {
+      net_profit: number;
+      profit_factor: number;
+      max_dd_pct: number;
+      total_trades: number;
+    };
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_monthly_pnl`
+
+Monthly P/L breakdown only.
+
+**When to call:** To analyze performance by month without full analysis.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;       // Path to report directory
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  monthly_data: Array<{
+    month: string;          // "2025-01"
+    profit: number;
+    trades: number;
+    win_rate: number;
+  }>;
+  green_months: number;
+  total_months: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_drawdown_events`
+
+Drawdown events and causes only.
+
+**When to call:** To identify and analyze drawdown periods.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  drawdowns: Array<{
+    start_date: string;
+    end_date: string;
+    depth_pct: number;
+    duration_days: number;
+    recovery_days: number;
+    cause?: string;
+  }>;
+  worst_dd_event: {
+    depth_pct: number;
+    date: string;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `analyze_top_losses`
+
+Worst losing deals only.
+
+**When to call:** To identify the biggest losing trades for analysis.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+  top_n?: number;          // Number of worst deals to return (default: 10)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  worst_deals: Array<{
+    entry_time: string;
+    exit_time: string;
+    profit: number;
+    profit_pct: number;
+    volume: number;
+    comment?: string;
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_loss_sequences`
+
+Consecutive loss patterns only.
+
+**When to call:** To analyze losing streak patterns.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  loss_streaks: Array<{
+    start_index: number;
+    end_index: number;
+    length: number;
+    total_loss: number;
+    avg_loss: number;
+  }>;
+  max_loss_streak: {
+    length: number;
+    total_loss: number;
+  };
+  error?: string;
+}
+```
+
+---
+
+## `analyze_position_pairs`
+
+Position hold time and P/L pairs.
+
+**When to call:** To analyze relationship between hold time and profit.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  pairs: Array<{
+    hold_time_minutes: number;
+    profit: number;
+    profit_pct: number;
+    count: number;
+  }>;
+  correlation: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_direction_bias`
+
+Buy vs Sell performance.
+
+**When to call:** To analyze directional bias in trading.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  buy_trades: {
+    count: number;
+    profit: number;
+    win_rate: number;
+  };
+  sell_trades: {
+    count: number;
+    profit: number;
+    win_rate: number;
+  };
+  bias: "buy" | "sell" | "neutral";
+  error?: string;
+}
+```
+
+---
+
+## `analyze_streaks`
+
+Win/loss streak analysis.
+
+**When to call:** To analyze winning and losing streak patterns.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  win_streaks: Array<{
+    length: number;
+    total_profit: number;
+  }>;
+  loss_streaks: Array<{
+    length: number;
+    total_loss: number;
+  }>;
+  max_win_streak: number;
+  max_loss_streak: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_concurrent_peak`
+
+Peak simultaneous positions.
+
+**When to call:** To analyze maximum position concurrency.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  max_concurrent: number;
+  avg_concurrent: number;
+  distribution: Array<{
+    concurrent_count: number;
+    occurrences: number;
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `list_deals`
+
+List individual deals with filters (type, profit range, volume, dates).
+
+**When to call:** To query individual trades with specific criteria.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+  deal_type?: "buy" | "sell" | "all";
+  min_profit?: number;
+  max_profit?: number;
+  min_volume?: number;
+  max_volume?: number;
+  from_date?: string;      // "YYYY-MM-DD"
+  to_date?: string;        // "YYYY-MM-DD"
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  deals: Array<{
+    entry_time: string;
+    exit_time: string;
+    type: "buy" | "sell";
+    profit: number;
+    profit_pct: number;
+    volume: number;
+    comment?: string;
+    magic?: number;
+  }>;
+  total: number;
+  error?: string;
+}
+```
+
+---
+
+## `search_deals_by_comment`
+
+Full-text search in deal comments (e.g., "Layer #3").
+
+**When to call:** To find deals with specific comment patterns.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+  query: string;           // Search pattern in comment field
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  deals: Array<{
+    entry_time: string;
+    exit_time: string;
+    type: "buy" | "sell";
+    profit: number;
+    profit_pct: number;
+    volume: number;
+    comment: string;
+    magic?: number;
+  }>;
+  total: number;
+  error?: string;
+}
+```
+
+---
+
+## `search_deals_by_magic`
+
+Filter deals by EA magic number.
+
+**When to call:** To find trades from a specific EA (by magic number).
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+  magic: number;           // EA magic number to filter by
+  limit?: number;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  deals: Array<{
+    entry_time: string;
+    exit_time: string;
+    type: "buy" | "sell";
+    profit: number;
+    profit_pct: number;
+    volume: number;
+    comment?: string;
+    magic: number;
+  }>;
+  total: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_profit_distribution`
+
+Profit histogram: small/medium/large wins and losses.
+
+**When to call:** To understand profit distribution across trade sizes.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  distribution: {
+    small_wins: {count: number; avg_profit: number};
+    medium_wins: {count: number; avg_profit: number};
+    large_wins: {count: number; avg_profit: number};
+    small_losses: {count: number; avg_loss: number};
+    medium_losses: {count: number; avg_loss: number};
+    large_losses: {count: number; avg_loss: number};
+  };
+  error?: string;
+}
+```
+
+---
+
+## `analyze_time_performance`
+
+Performance by hour of day and day of week.
+
+**When to call:** To identify best/worst trading times.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  hourly_performance: Array<{
+    hour: number;
+    profit: number;
+    trades: number;
+    win_rate: number;
+  }>;
+  daily_performance: Array<{
+    day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri";
+    profit: number;
+    trades: number;
+    win_rate: number;
+  }>;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_hold_time_distribution`
+
+Hold time buckets + correlation with profit.
+
+**When to call:** To analyze relationship between position duration and profit.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  buckets: Array<{
+    label: string;        // e.g. "<5m", "5-15m", "15-60m", ">1h"
+    min_minutes: number;
+    max_minutes: number;
+    count: number;
+    avg_profit: number;
+    win_rate: number;
+  }>;
+  correlation: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_layer_performance`
+
+Grid/martingale layer analysis from comments.
+
+**When to call:** To analyze performance by grid layer (for grid/martingale strategies).
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  layers: Array<{
+    layer: number;        // e.g. "L1", "L2", "L3"
+    count: number;
+    profit: number;
+    win_rate: number;
+    avg_profit: number;
+  }>;
+  max_layer: number;
+  l5_plus_count: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_volume_vs_profit`
+
+Volume correlation + performance by lot size.
+
+**When to call:** To analyze relationship between position size and profit.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  by_volume: Array<{
+    volume: number;
+    count: number;
+    avg_profit: number;
+    win_rate: number;
+  }>;
+  correlation: number;
+  optimal_volume: number;
+  error?: string;
+}
+```
+
+---
+
+## `analyze_costs`
+
+Commission and swap impact on profitability.
+
+**When to call:** To understand the impact of trading costs.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  costs: {
+    total_commission: number;
+    total_swap: number;
+    total_spread: number;
+    avg_commission_per_trade: number;
+    avg_swap_per_trade: number;
+  };
+  cost_impact_pct: number; // Costs as % of gross profit
+  error?: string;
+}
+```
+
+---
+
+## `analyze_efficiency`
+
+Profit per hour/day, annualized return, trade frequency.
+
+**When to call:** To measure overall trading efficiency.
+
+### Input schema
+
+```typescript
+{
+  report_dir: string;
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  efficiency: {
+    profit_per_hour: number;
+    profit_per_day: number;
+    profit_per_trade: number;
+    trades_per_day: number;
+    annualized_return_pct: number;
+  };
+  error?: string;
+}
 ```
 
 ---
