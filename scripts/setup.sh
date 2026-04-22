@@ -14,7 +14,7 @@
 #   - Windsurf     : ~/.codeium/windsurf/mcp_config.json (JSON, mcpServers)
 #   - Cursor       : ~/.cursor/mcp.json (JSON, mcpServers)
 #   - VS Code      : .vscode/mcp.json (JSON, servers - not mcpServers)
-#   - Antigravity  : mcp_config.json via UI (JSON, mcpServers)
+#   - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
 #
 #   Previous installations are auto-detected and uninstalled before re-registering.
 
@@ -1201,7 +1201,7 @@ _register_all_mcp_platforms() {
         echo "  - Windsurf:   Edit ~/.codeium/windsurf/mcp_config.json"
         echo "  - Cursor:     Edit ~/.cursor/mcp.json"
         echo "  - VS Code:    Edit .vscode/mcp.json (workspace) or use MCP: Add Server command"
-        echo "  - Antigravity:Use Agent panel → MCP Servers → Manage → Edit configuration"
+        echo "  - Claude Desktop: Edit ~/Library/Application Support/Claude/claude_desktop_config.json"
         echo ""
         return
     fi
