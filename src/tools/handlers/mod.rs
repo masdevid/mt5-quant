@@ -179,6 +179,7 @@ pub(crate) fn dir_size(path: &Path) -> u64 {
         .sum()
 }
 
+#[allow(dead_code)]
 pub(crate) fn past_complete_month() -> (String, String) {
     let now = chrono::Utc::now();
     let today = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)

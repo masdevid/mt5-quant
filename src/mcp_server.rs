@@ -4,6 +4,7 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::{models::Config as ModelsConfig, tools::ToolHandler, McpError, McpRequest, McpResponse};
 
+#[allow(dead_code)]
 type NotificationCallback = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
 /// Auto-verify result stored after first initialization
@@ -59,6 +60,7 @@ impl McpServer {
         *handler_guard = Some(new_handler);
     }
 
+    #[allow(dead_code)]
     pub async fn get_notification_sender(&self) -> Option<mpsc::UnboundedSender<Notification>> {
         let guard = self.notification_tx.lock().await;
         guard.clone()

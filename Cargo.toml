@@ -11,6 +11,8 @@ keywords = ["mt5", "mql5", "trading", "mcp", "backtest"]
 categories = ["finance", "development-tools"]
 homepage = "https://github.com/masdevid/mt5-quant"
 documentation = "https://github.com/masdevid/mt5-quant"
+
+[package.metadata]
 maintenance = { status = "actively-developed" }
 
 [[bin]]
