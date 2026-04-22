@@ -1,6 +1,6 @@
 # MT5-Quant
 
-**MCP server for MT5 strategy development on macOS/Linux.** 87 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
+**MCP server for MT5 strategy development on macOS/Linux.** 89 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
 
 ```
 You: "Backtest MyEA Jan-Mar, what caused the February drawdown?"
@@ -15,15 +15,15 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 **Focus:** Backtest organization, reporting, and analytics — capabilities MT5 itself doesn't provide.
 
-| | MT5-Quant | Others | QuantConnect |
-|---|---|---|---|
-| **Platform** | macOS/Linux native | Windows only | Cloud only |
-| **Backtest pipeline** | ✅ Full (compile → run → analyze) | ✅ Via MT5 Python package | ❌ |
-| **Deal-level analytics** | ✅ 15+ dimensions | ❌ | ❌ |
-| **Report organization** | ✅ SQLite + search + history | ❌ | ❌ |
-| **MQL5 compilation** | ✅ Headless (MetaEditor via Wine, no GUI) | ⚠️ Via GUI or terminal | ❌ |
-| **Optimization** | ✅ Background + results parsing + .set generation | ⚠️ Terminal only, no parsing | ✅ Paid |
-| **Crash debugging** | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
+| | MT5-Quant | Others |
+|---|---|---|
+| **Platform** | macOS/Linux native | Windows only |
+| **Backtest pipeline** | ✅ Full (compile → run → analyze) | ✅ Via MT5 Python package |
+| **Deal-level analytics** | ✅ 15+ dimensions | ❌ |
+| **Report organization** | ✅ SQLite + search + history | ❌ |
+| **MQL5 compilation** | ✅ Headless (MetaEditor via Wine, no GUI) | ⚠️ Via GUI or terminal |
+| **Optimization** | ✅ Background + results parsing + .set generation | ⚠️ Terminal only, no parsing |
+| **Crash debugging** | ✅ Wine/MT5 diagnostics | ❌ |
 
 **Others** typically run on Windows using the [MetaTrader5 Python package](https://pypi.org/project/MetaTrader5/), providing full terminal operations. MT5-Quant fills the gap: **organizing backtest reports, extracting deal-level insights, and managing optimization workflows** — none of which MT5 or its Python API expose natively.
 
@@ -93,7 +93,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [VSCODE.md](docs/VSCODE.md) | VS Code setup |
 | [CLAUDE.md](docs/CLAUDE.md) | Claude Desktop setup |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
-| [TOOLS.md](docs/MCP_TOOLS.md) | All 87 tools documented |
+| [TOOLS.md](docs/MCP_TOOLS.md) | All 89 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
 | [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |

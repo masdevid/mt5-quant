@@ -190,4 +190,4 @@ The AI will:
 
 ---
 
-**Next:** See [TOOLS.md](TOOLS.md) for all 43 available tools.
+**Next:** See [TOOLS.md](TOOLS.md) for all 89 available tools.

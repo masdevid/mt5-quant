@@ -33,7 +33,7 @@ MT5-Quant/
 │   │   ├── backtest.rs         # 5-stage pipeline (COMPILE→CLEAN→BACKTEST→EXTRACT→ANALYZE)
 │   │   └── stages.rs           # Pipeline stage definitions
 │   └── tools/                  # MCP tool definitions
-│       ├── definitions/        # Tool schemas (9 domain modules, 43 tools)
+│       ├── definitions/        # Tool schemas (9 domain modules, 89 tools)
 │       │   ├── mod.rs
 │       │   ├── analytics.rs      # 9 analysis tools
 │       │   ├── backtest.rs       # 4 backtest tools
