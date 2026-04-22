@@ -19,8 +19,8 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 |---|---|---|
 | **Platform** | macOS/Linux native | Windows only |
 | **Backtest pipeline** | ✅ Full (compile → run → analyze) | ✅ Via MT5 Python package |
-| **Deal-level analytics** | ✅ 15+ dimensions | ❌ |
-| **Report organization** | ✅ SQLite + search + history | ❌ |
+| **Deal-level analytics** | ✅ 19 dimensions, DB-backed | ❌ |
+| **Report organization** | ✅ SQLite (reports + deals) + search + history | ❌ |
 | **MQL5 compilation** | ✅ Headless (MetaEditor via Wine, no GUI) | ⚠️ Via GUI or terminal |
 | **Optimization** | ✅ Background + results parsing + .set generation | ⚠️ Terminal only, no parsing |
 | **Crash debugging** | ✅ Wine/MT5 diagnostics | ❌ |

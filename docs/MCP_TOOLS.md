@@ -2629,7 +2629,7 @@ Get Wine prefix details: Windows version, installed programs, registry.
 
 ## `get_backtest_crash_info`
 
-Investigate backtest failures: incomplete markers, missing deals.csv, errors.
+Investigate backtest failures: incomplete markers, missing metrics.json, Wine/MT5 errors.
 
 **When to call:** When a backtest fails unexpectedly.
 
@@ -3052,6 +3052,55 @@ Find comparable reports (same EA/symbol/timeframe).
     };
   }>;
   error?: string;
+}
+```
+
+---
+
+## `export_deals_csv`
+
+Export deals for a report to a CSV file on demand. Deals are stored in the database — use this when you need a CSV file for external tools (Excel, pandas, etc.).
+
+**When to call:** When you need a `deals.csv` file. CSV is not written automatically after backtests anymore.
+
+### Input schema
+
+```typescript
+{
+  report_id?: string;       // Report ID to export (default: latest report)
+  output_path?: string;     // File path for CSV output (default: <report_dir>/deals.csv)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: boolean;
+  report_id: string;
+  deals_count: number;
+  output_path: string;      // Absolute path to the written CSV file
+}
+```
+
+### Example
+
+```json
+// Input — export latest report to default path
+{}
+
+// Input — export specific report to custom path
+{
+  "report_id": "20260422_051041_DPS21_XAUUSDc_M5_1",
+  "output_path": "/tmp/dps21_deals.csv"
+}
+
+// Output
+{
+  "success": true,
+  "report_id": "20260422_051041_DPS21_XAUUSDc_M5_1",
+  "deals_count": 891,
+  "output_path": "/Users/…/reports/20260422_051041_DPS21_XAUUSDc_M5_1/deals.csv"
 }
 ```
 
