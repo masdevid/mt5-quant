@@ -2,8 +2,16 @@
 name = "mt5-quant"
 version = "1.31.5"
 edition = "2021"
-description = "MT5-Quant MCP Server - Exposes MT5 backtest and optimization tools via MCP"
+description = "MCP server for MT5 strategy development on macOS/Linux"
 authors = ["masdevid <masdevid@example.com>"]
+license = "MIT"
+repository = "https://github.com/masdevid/mt5-quant"
+readme = "README.md"
+keywords = ["mt5", "mql5", "trading", "mcp", "backtest"]
+categories = ["finance", "development-tools"]
+homepage = "https://github.com/masdevid/mt5-quant"
+documentation = "https://github.com/masdevid/mt5-quant"
+maintenance = { status = "actively-developed" }
 
 [[bin]]
 name = "mt5-quant"

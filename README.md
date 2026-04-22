@@ -22,9 +22,26 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 | Optimization | ✅ Background | ❌ | ✅ Paid |
 | Crash debugging | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
 
+## Why Rust
+
+**MT5-Quant is built entirely in Rust** — one static binary, zero dependencies, instant startup.
+
+| | Rust | Python/Node |
+|---|---|---|
+| **Startup** | ~10ms | 200–500ms |
+| **Deploy** | Single binary | venv + pip/npm |
+| **Memory** | <50MB, no GC pauses | Unpredictable spikes |
+| **Safety** | Compile-time guaranteed | Runtime exceptions |
+
+**Why this matters for trading:**
+- **No garbage collection** — Process 100k+ deal rows without GC pauses during live analysis
+- **Async via Tokio** — Run 50 concurrent backtest analyses on a thread pool
+- **Cross-platform** — Same source compiles to native macOS arm64 and Linux x86_64
+- **Type-safe pipelines** — MQL5 compilation, Wine path handling, SQLite queries: all checked at compile time
+
 ## Quick Install
 
-### 1. Download & Setup
+### Option 1: Pre-built Binary (Recommended)
 
 ```bash
 curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
@@ -32,7 +49,16 @@ tar -xzf mt5.tar.gz
 bash scripts/setup.sh
 ```
 
-### 2. Register MCP Server
+### Option 2: Cargo Install (if you have Rust)
+
+```bash
+cargo install mt5-quant
+mt5-quant --help
+```
+
+Compiles from source. Takes 2–5 minutes. Requires Rust 1.70+.
+
+### Register MCP Server
 
 | Platform | Command / Config | Docs |
 |----------|------------------|------|
@@ -242,6 +268,37 @@ For crashes or unexplained failures during backtest/compile/optimization:
 **[Full Troubleshooting Guide →](docs/TROUBLESHOOTING.md)**
 
 ---
+
+## Acknowledgements
+
+MT5-Quant stands on the shoulders of exceptional open-source projects:
+
+- **[Rust](https://www.rust-lang.org/)** — The language that makes zero-cost abstractions, memory safety, and fearless concurrency practical
+- **[Tokio](https://tokio.rs/)** — The async runtime powering all concurrent operations
+- **[Wine](https://www.winehq.org/)** — Making MT5 execution possible on macOS and Linux without Windows licensing
+- **[MetaTrader 5](https://www.metatrader5.com/)** — MetaQuotes' trading platform (trademark of MetaQuotes Software Corp.)
+- **[rusqlite](https://github.com/rusqlite/rusqlite)** — Ergonomic SQLite bindings for Rust
+- **[serde](https://serde.rs/)** — The serialization framework making config and report handling painless
+- **[scraper](https://github.com/causal-agent/scraper)** — HTML parsing for MT5 report extraction
+- **[tempfile](https://github.com/Stebalien/temp-file)** — Secure temporary file handling
+
+Special thanks to the Model Context Protocol (MCP) team at Anthropic for defining the standard that makes AI-powered development workflows possible.
+
+## Disclaimer
+
+**Not Financial Advice.** MT5-Quant is a development and analysis tool for algorithmic trading strategies. It does not provide investment advice, trading recommendations, or guarantee profitability. All backtest results are historical simulations and do not guarantee future performance.
+
+**Use at Your Own Risk.** Trading financial instruments carries substantial risk of loss. The authors and contributors of MT5-Quant accept no liability for:
+- Trading losses incurred using strategies developed or tested with this tool
+- Data loss or corruption from backtest operations
+- Bugs, errors, or incorrect analysis results
+- System crashes, Wine compatibility issues, or MT5 failures
+
+**Software Warranty.** This software is provided "as-is" without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement. See LICENSE for full terms.
+
+**Third-Party Software.** MT5-Quant interacts with MetaTrader 5, Wine, and other third-party software. Users are responsible for complying with all applicable licenses and terms of service for these dependencies. MetaTrader is a trademark of MetaQuotes Software Corp. MT5-Quant is not affiliated with, endorsed by, or sponsored by MetaQuotes.
+
+**Regulatory Compliance.** Users are responsible for ensuring their trading activities comply with applicable financial regulations in their jurisdiction. Automated trading may be restricted or require licensing in some regions.
 
 ## License
 
