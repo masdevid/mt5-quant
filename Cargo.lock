@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "mt5-quant"
-version = "1.32.1"
+version = "1.32.3"
 dependencies = [
  "anyhow",
  "base64",
