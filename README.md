@@ -22,7 +22,7 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 | **Deal-level analytics** | ✅ 15+ dimensions | ❌ | ❌ |
 | **Report organization** | ✅ SQLite + search + history | ❌ | ❌ |
 | **MQL5 compilation** | ✅ Headless (MetaEditor via Wine, no GUI) | ⚠️ Via GUI or terminal | ❌ |
-| **Optimization** | ✅ Background + results parsing | ❌ | ✅ Paid |
+| **Optimization** | ✅ Background + results parsing + .set generation | ⚠️ Terminal only, no parsing | ✅ Paid |
 | **Crash debugging** | ✅ Wine/MT5 diagnostics | ❌ | ❌ |
 
 **Others** typically run on Windows using the [MetaTrader5 Python package](https://pypi.org/project/MetaTrader5/), providing full terminal operations. MT5-Quant fills the gap: **organizing backtest reports, extracting deal-level insights, and managing optimization workflows** — none of which MT5 or its Python API expose natively.
