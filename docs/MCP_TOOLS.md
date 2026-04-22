@@ -2,7 +2,7 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** This file documents 56 of 87 total tools. Missing:
+> **Documentation Status:** This file documents 56 of 89 total tools. Missing:
 > - `list_experts`, `list_indicators`, `list_scripts`
 > - `healthcheck`, `list_symbols`
 > - Reports query: `search_reports`, `get_latest_report`, `list_reports`, `prune_reports`, `tail_log`, `get_report_by_id`, `get_reports_summary`, `get_best_reports`, `search_reports_by_tags`, `search_reports_by_date_range`, `search_reports_by_notes`, `get_reports_by_set_file`, `get_comparable_reports`
