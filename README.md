@@ -27,7 +27,7 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 ### 1. Download & Setup
 
 ```bash
-curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-macos-arm64.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
 tar -xzf mt5.tar.gz
 bash scripts/setup.sh
 ```
@@ -40,7 +40,7 @@ bash scripts/setup.sh
 | **Windsurf** | Edit `~/.codeium/windsurf/mcp_config.json` | [WINDSURF.md →](docs/WINDSURF.md) |
 | **Cursor** | Edit `~/.cursor/mcp.json` or use Settings → MCP | [CURSOR.md →](docs/CURSOR.md) |
 | **VS Code** | Edit `.vscode/mcp.json` or run `MCP: Add Server` | [VSCODE.md →](docs/VSCODE.md) |
-| **Antigravity** | Agent Panel → ... → MCP Servers → Edit configuration | [ANTIGRAVITY.md →](docs/ANTIGRAVITY.md) |
+| **Claude Desktop** | Agent Panel → ... → MCP Servers → Edit configuration | [CLAUDE.md →](docs/CLAUDE.md) |
 
 > **Note:** Use absolute paths like `/Users/name/mt5-quant/mt5-quant` or `$(pwd)/mt5-quant`, not relative paths like `./mt5-quant`.
 
@@ -60,7 +60,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 | [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE setup |
 | [CURSOR.md](docs/CURSOR.md) | Cursor IDE setup |
 | [VSCODE.md](docs/VSCODE.md) | VS Code setup |
-| [ANTIGRAVITY.md](docs/ANTIGRAVITY.md) | Antigravity IDE setup |
+| [CLAUDE.md](docs/CLAUDE.md) | Claude Desktop setup |
 | [CONFIG.md](docs/CONFIG.md) | Configuration reference |
 | [TOOLS.md](docs/MCP_TOOLS.md) | All 87 tools documented |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
