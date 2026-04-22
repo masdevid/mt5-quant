@@ -823,12 +823,12 @@ impl BacktestPipeline {
         };
 
         let set_file_line = params.set_file.as_ref()
-            .map(|p| format!("ExpertParameters={}\n", p))
+            .map(|p| format!("ExpertParameters={}\n", Self::ini_safe(p)))
             .unwrap_or_default();
 
         let updates: &[(&str, String)] = &[
-            ("Expert",           expert_path),
-            ("Symbol",           params.symbol.clone()),
+            ("Expert",           Self::ini_safe(&expert_path)),
+            ("Symbol",           Self::ini_safe(&params.symbol)),
             ("Period",           period.to_string()),
             ("DateRange",        "3".into()),
             ("DateFrom",         from_ts.to_string()),
@@ -853,6 +853,11 @@ impl BacktestPipeline {
         fs::write(&terminal_ini, bom_utf16)?;
         tracing::info!("terminal.ini [Tester] updated → {}", terminal_ini.display());
         Ok(())
+    }
+
+    /// Strip CR/LF from a user-supplied INI value to prevent newline injection.
+    fn ini_safe(value: &str) -> String {
+        value.replace(['\n', '\r'], "")
     }
 
     fn patch_ini_section(text: &str, section: &str, updates: &[(&str, String)]) -> String {
@@ -1025,9 +1030,9 @@ impl BacktestPipeline {
 
         ini.push_str("[Tester]\n");
         // Expert path is relative to MQL5/Experts/ in the /config: format (no "Experts\" prefix).
-        ini.push_str(&format!("Expert={}\n", self.resolve_backtest_ini_expert_path(&params.expert)));
-        ini.push_str(&format!("Symbol={}\n", params.symbol));
-        ini.push_str(&format!("Period={}\n", params.timeframe));
+        ini.push_str(&format!("Expert={}\n", Self::ini_safe(&self.resolve_backtest_ini_expert_path(&params.expert))));
+        ini.push_str(&format!("Symbol={}\n", Self::ini_safe(&params.symbol)));
+        ini.push_str(&format!("Period={}\n", Self::ini_safe(&params.timeframe)));
         ini.push_str("Optimization=0\n");
         ini.push_str(&format!("Model={}\n", params.model));
         ini.push_str(&format!("FromDate={}\n", params.from_date));
@@ -1044,7 +1049,7 @@ impl BacktestPipeline {
         ini.push_str(&format!("ShutdownTerminal={}\n", if params.shutdown { "1" } else { "0" }));
 
         if let Some(set_file) = &params.set_file {
-            ini.push_str(&format!("ExpertParameters={}\n", set_file));
+            ini.push_str(&format!("ExpertParameters={}\n", Self::ini_safe(set_file)));
         }
 
         Ok(ini)
