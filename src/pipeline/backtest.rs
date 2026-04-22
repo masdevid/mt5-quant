@@ -295,13 +295,14 @@ impl BacktestPipeline {
     }
 
     /// Extract deals from a completed report and store them in the DB.
+    /// Returns true if extraction and DB registration succeeded.
     async fn extract_and_store(
         report_path: &Path,
         report_dir: &Path,
         report_id: &str,
         config: &Config,
         params: &BacktestParams,
-    ) {
+    ) -> bool {
         let extractor = ReportExtractor::new();
         let start_time = chrono::Utc::now();
         match extractor.extract(
@@ -313,7 +314,7 @@ impl BacktestPipeline {
                 let db = ReportDb::new(&Config::db_path());
                 if db.init().is_err() {
                     tracing::warn!("launch_backtest: failed to init DB for {}", report_id);
-                    return;
+                    return false;
                 }
                 let entry = ReportEntry {
                     id: report_id.to_string(),
@@ -345,15 +346,17 @@ impl BacktestPipeline {
                 };
                 if let Err(e) = db.insert(&entry) {
                     tracing::warn!("launch_backtest: failed to register report in DB: {}", e);
-                    return;
+                    return false;
                 }
                 if let Err(e) = db.insert_deals(report_id, &extraction.deals) {
                     tracing::warn!("launch_backtest: failed to store deals in DB: {}", e);
                 }
                 tracing::info!("launch_backtest: extracted {} deals for {}", extraction.deals.len(), report_id);
+                true
             }
             Err(e) => {
                 tracing::warn!("launch_backtest: extraction failed for {}: {}", report_id, e);
+                false
             }
         }
     }
@@ -381,8 +384,12 @@ impl BacktestPipeline {
                 let candidate = expected_report.with_extension(ext.trim_start_matches('.'));
                 if candidate.exists() {
                     tracing::info!("Backtest {} completed: report found at {}", report_id, candidate.display());
-                    Self::extract_and_store(&candidate, &report_dir, &report_id, &config, &params).await;
-                    let _ = fs::remove_file(&candidate);
+                    let extracted = Self::extract_and_store(&candidate, &report_dir, &report_id, &config, &params).await;
+                    if extracted {
+                        let _ = fs::remove_file(&candidate);
+                    } else {
+                        tracing::warn!("Backtest {}: extraction failed, keeping report file at {}", report_id, candidate.display());
+                    }
                     Self::update_job_status(&report_dir, "completed", Some(candidate.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
                         callback("backtest_completed", json!({
@@ -401,10 +408,22 @@ impl BacktestPipeline {
 
             if !in_grace && !mt5_alive {
                 // MT5 exited without report - check for any newer report
-                if let Some(path) = Self::find_newest_report(expected_report.parent().unwrap(), poll_start) {
+                let reports_parent = match expected_report.parent() {
+                    Some(p) => p,
+                    None => {
+                        tracing::error!("Backtest {}: expected_report path has no parent", report_id);
+                        Self::update_job_status(&report_dir, "failed", None).await;
+                        return;
+                    }
+                };
+                if let Some(path) = Self::find_newest_report(reports_parent, poll_start) {
                     tracing::info!("Backtest {} completed: found fallback report {}", report_id, path.display());
-                    Self::extract_and_store(&path, &report_dir, &report_id, &config, &params).await;
-                    let _ = fs::remove_file(&path);
+                    let extracted = Self::extract_and_store(&path, &report_dir, &report_id, &config, &params).await;
+                    if extracted {
+                        let _ = fs::remove_file(&path);
+                    } else {
+                        tracing::warn!("Backtest {}: extraction failed, keeping fallback report at {}", report_id, path.display());
+                    }
                     Self::update_job_status(&report_dir, "completed", Some(path.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
                         callback("backtest_completed", json!({

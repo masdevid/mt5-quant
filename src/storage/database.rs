@@ -564,26 +564,39 @@ impl ReportDb {
     /// Search reports by tags (at least one tag must match)
     pub fn search_by_tags(&self, tags: &[String], limit: usize) -> Result<Vec<ReportEntry>> {
         let conn = self.connect()?;
-        let mut sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+        let base_sql = "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
             created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE 1=1"
-            .to_string();
+            FROM reports WHERE 1=1";
 
-        // Build OR conditions for tags - use JSON1 extension for tag matching
-        if !tags.is_empty() {
-            let tag_conditions: Vec<String> = tags.iter()
-                .map(|tag| format!("tags LIKE '%{}%'", tag.replace("'", "''")))
+        let (sql, params): (String, Vec<rusqlite::types::Value>) = if tags.is_empty() {
+            (
+                format!("{} ORDER BY created_at DESC LIMIT ?1", base_sql),
+                vec![(limit as i64).into()],
+            )
+        } else {
+            let placeholders = tags.iter().enumerate()
+                .map(|(i, _)| format!("tags LIKE ?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let sql = format!(
+                "{} AND ({}) ORDER BY created_at DESC LIMIT ?{}",
+                base_sql,
+                placeholders,
+                tags.len() + 1
+            );
+            let mut p: Vec<rusqlite::types::Value> = tags.iter()
+                .map(|t| format!("%{}%", t).into())
                 .collect();
-            sql.push_str(&format!(" AND ({})", tag_conditions.join(" OR ")));
-        }
-        sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
+            p.push((limit as i64).into());
+            (sql, p)
+        };
 
         let mut stmt = conn.prepare(&sql)?;
         let entries: Vec<ReportEntry> = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| {
                 let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
                 let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
                 Ok(ReportEntry {
@@ -624,19 +637,18 @@ impl ReportDb {
     /// Search reports by notes text (case-insensitive LIKE)
     pub fn search_by_notes(&self, query: &str, limit: usize) -> Result<Vec<ReportEntry>> {
         let conn = self.connect()?;
-        let pattern = format!("%{}%", query.replace("'", "''"));
+        let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
-            &format!("SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
             created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE notes LIKE '{}' ORDER BY created_at DESC LIMIT {}",
-            pattern, limit)
+            FROM reports WHERE notes LIKE ?1 ORDER BY created_at DESC LIMIT ?2"
         )?;
 
         let entries: Vec<ReportEntry> = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params![pattern, limit as i64], |row| {
                 let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
                 let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
                 Ok(ReportEntry {
@@ -677,20 +689,19 @@ impl ReportDb {
     /// Find reports by set file (original or snapshot)
     pub fn search_by_set_file(&self, set_file: &str, limit: usize) -> Result<Vec<ReportEntry>> {
         let conn = self.connect()?;
-        let pattern = format!("%{}%", set_file.replace("'", "''"));
+        let pattern = format!("%{}%", set_file);
         let mut stmt = conn.prepare(
-            &format!("SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
             created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE (set_file_original LIKE '{}' OR set_snapshot_path LIKE '{}') \
-            ORDER BY created_at DESC LIMIT {}",
-            pattern, pattern, limit)
+            FROM reports WHERE (set_file_original LIKE ?1 OR set_snapshot_path LIKE ?1) \
+            ORDER BY created_at DESC LIMIT ?2"
         )?;
 
         let entries: Vec<ReportEntry> = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params![pattern, limit as i64], |row| {
                 let tags_str: String = row.get(23).unwrap_or_else(|_| "[]".to_string());
                 let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
                 Ok(ReportEntry {
