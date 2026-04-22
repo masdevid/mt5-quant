@@ -1,14 +1,12 @@
-# Architecture Deep Dive
+# Architecture
 
-## Design Philosophy
+## Design Principles
 
-**Deal-level over aggregate.** MT5's built-in HTML report gives you: profit, profit factor, max DD%, trade count. That's it. You cannot tell from those numbers whether a drawdown was caused by overleveraged locking, a bad entry during a news spike, or a grid that reached L8 in a trending market.
+**Deal-level over aggregate.** MT5's HTML report gives you: profit, profit factor, max DD%, trade count. MT5-Quant extracts every individual deal — entry price, exit price, P/L, comment string — to reconstruct what happened during each loss event. Result: `analysis.json`, AI-readable and diffable between runs.
 
-MT5-Quant extracts every individual deal — entry price, exit price, P/L, comment string — and reconstructs what was happening when each loss event occurred. The `analysis.json` artifact is the result: AI-readable, stable schema, diffable between runs.
+**Pipeline idempotency.** MT5 caches aggressively (`.ex5` binaries, `.set` files, `terminal.ini` flags). The pipeline invalidates all cache before every run to prevent stale results.
 
-**Pipeline idempotency.** MT5 caches aggressively. Cached `.ex5` binaries, cached `.set` files, stale `terminal.ini` flags. The pipeline exists specifically to invalidate all of these before every run. A backtest result that came from a cached EA binary is wrong in a way that's impossible to detect without the cache clear step.
-
-**Background isolation for optimization.** Genetic optimizations run 2-6 hours. Running them inside a parent process that can be killed (Claude task runner, SSH session, terminal) corrupts the MT5 optimization state. The only correct pattern is `nohup + disown` — fully detached from all parent process trees.
+**Background isolation.** Genetic optimizations run 2-6 hours. The `nohup + disown` pattern prevents corruption if the parent process (SSH, Claude runner) is killed.
 
 ---
 
@@ -58,11 +56,6 @@ MT5-Quant/
 │   ├── platform_detect.sh      # Wine path + headless detection
 │   ├── build-rust.sh           # Rust build script
 │   └── optimize.sh             # Genetic optimization launcher (nohup + disown)
-│
-├── analytics/                    # Legacy Python (reference only)
-│   ├── extract.py
-│   ├── analyze.py
-│   └── optimize_parser.py
 │
 ├── config/
 │   ├── mt5-quant.example.yaml  # Template config
@@ -231,15 +224,6 @@ Built-in profiles:
 | `trend` | — | `magic` | 240 | breakeven, trailing, partial, tp, sl |
 | `hedge` | — | `magic+direction` | 120 | tp, sl, net_close, partial |
 
-#### Entry points (after `pip install -e .`)
-
-```bash
-mt5-analyze         deals.csv   # generic
-mt5-analyze-grid    deals.csv   # grid / martingale (default in pipeline)
-mt5-analyze-scalper deals.csv   # scalper
-mt5-analyze-trend   deals.csv   # trend following
-mt5-analyze-hedge   deals.csv   # hedging
-```
 
 #### Analytics functions
 
@@ -416,7 +400,7 @@ Then set `DISPLAY=:99` in MT5-Quant's environment config.
 
 **Comment-based analytics:**
 - Strategy-specific analytics (depth histogram, exit reason, DD cause) depend on EA comment strings. EAs that don't write structured comments will get `generic` profile results — summary metrics, session breakdown, streaks, and direction bias all still work; only keyword-classified fields fall back to `"unknown"` or profit-sign.
-- Custom comment patterns can be supported by adding a new entry to `PROFILES` in `analytics/analyze.py` — no other code changes needed.
+- Custom comment patterns can be supported by adding a new entry to `PROFILES` in `src/analytics/analyze.rs`.
 
 **Single MT5 instance:**
 - MT5 is single-instance per Windows drive. Two backtests cannot run simultaneously on the same Wine prefix. Parallelism requires multiple Wine prefixes (separate installations).
@@ -425,34 +409,8 @@ Then set `DISPLAY=:99` in MT5-Quant's environment config.
 
 ## Claude Code Integration
 
-`setup.sh --claude-code` generates two files that give Claude persistent context about the user's trading setup:
-
-### `config/CLAUDE.template.md`
-
-A project-level CLAUDE.md template the user copies to their EA project root. Encodes:
+`setup.sh` generates `config/CLAUDE.template.md` — a project-level template encoding:
 - MT5-Quant tool names and when to use them
-- Baseline tracking policy (never call something an improvement without comparing to `baseline.json`)
-- Symbol name reminder (broker-specific suffix matters — `XAUUSD.cent` ≠ `XAUUSD`)
-- Backtest and optimization constraints (model 0, single instance, UTF-16LE .set files)
-
-### `.claude/hooks/user-prompt-submit.sh`
-
-A Claude Code hook that runs before every prompt submission. Reads `config/baseline.json` and outputs a JSON context block:
-
-```json
-{"context": "## Production Baseline (config/baseline.json)\n..."}
-```
-
-Claude Code injects this into the system context for every conversation turn. The result: Claude always knows the current production metrics without the user having to paste them.
-
-**Hook execution path:**
-```
-User types prompt
-    → user-prompt-submit.sh executes
-    → reads config/baseline.json
-    → outputs {"context": "..."} to stdout
-    → Claude Code prepends to system context
-    → Claude sees baseline in every prompt
-```
-
-**Graceful degradation:** If `baseline.json` doesn't exist or is malformed, the hook exits 0 silently — no prompt is blocked. The baseline section simply doesn't appear until the user creates the file.
+- Baseline tracking policy (compare to `baseline.json` before calling improvements)
+- Symbol name reminders (`XAUUSD.cent` ≠ `XAUUSD`)
+- Backtest constraints (model 0, UTF-16LE .set files)
