@@ -7,6 +7,7 @@ use crate::analytics::DealAnalyzer;
 use crate::models::deals::Deal;
 use crate::models::metrics::Metrics;
 use crate::models::Config;
+use crate::storage::ReportDb;
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -30,66 +31,46 @@ fn err_response(msg: impl std::fmt::Display) -> Value {
     })
 }
 
-fn load_report_data(report_dir: &str) -> Result<(Vec<Deal>, Metrics)> {
-    let deals_csv = Path::new(report_dir).join("deals.csv");
-    let metrics_json = Path::new(report_dir).join("metrics.json");
+/// Resolve a report from args (report_id > report_dir > latest).
+/// Returns (deals, metrics, report_dir).
+fn resolve_report(args: &Value) -> Result<(Vec<Deal>, Metrics, String)> {
+    let db = ReportDb::new(&Config::db_path());
+    db.init()?;
 
-    if !deals_csv.exists() {
-        return Err(anyhow::anyhow!("deals.csv not found in {}", report_dir));
-    }
+    let entry = if let Some(id) = args.get("report_id").and_then(|v| v.as_str()) {
+        db.get_by_id(id)?
+            .ok_or_else(|| anyhow::anyhow!("Report '{}' not found in DB", id))?
+    } else if let Some(dir) = args.get("report_dir").and_then(|v| v.as_str()) {
+        db.get_by_report_dir(dir)?
+            .ok_or_else(|| anyhow::anyhow!(
+                "No DB entry for report_dir '{}'. This report may predate DB storage.", dir
+            ))?
+    } else {
+        db.get_latest()?
+            .ok_or_else(|| anyhow::anyhow!("No reports in DB. Run a backtest first."))?
+    };
 
-    let deals = read_deals_from_csv(&deals_csv)?;
-    let metrics = if metrics_json.exists() {
-        serde_json::from_str(&fs::read_to_string(&metrics_json)?)?
+    let deals = db.get_deals(&entry.id)?;
+
+    let metrics_path = Path::new(&entry.report_dir).join("metrics.json");
+    let metrics = if metrics_path.exists() {
+        serde_json::from_str(&fs::read_to_string(&metrics_path)?)?
     } else {
         Metrics::default()
     };
 
-    Ok((deals, metrics))
+    Ok((deals, metrics, entry.report_dir))
 }
 
-fn prepare_analysis(report_dir: &str) -> Result<(Vec<Deal>, Metrics, DealAnalyzer)> {
-    let (deals, metrics) = load_report_data(report_dir)?;
-    Ok((deals, metrics, DealAnalyzer::new()))
-}
-
-fn read_deals_from_csv(path: &Path) -> Result<Vec<Deal>> {
-    let content = fs::read_to_string(path)?;
-    let mut deals = Vec::new();
-
-    let mut lines = content.lines();
-    let _header = lines.next();
-
-    for line in lines {
-        let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() >= 12 {
-            deals.push(Deal {
-                time: parts[0].to_string(),
-                deal: parts[1].to_string(),
-                symbol: parts[2].to_string(),
-                deal_type: parts[3].to_string(),
-                entry: parts[4].to_string(),
-                volume: parts[5].parse().unwrap_or(0.0),
-                price: parts[6].parse().unwrap_or(0.0),
-                order: parts[7].to_string(),
-                commission: parts[8].parse().unwrap_or(0.0),
-                swap: parts[9].parse().unwrap_or(0.0),
-                profit: parts[10].parse().unwrap_or(0.0),
-                balance: parts[11].parse().unwrap_or(0.0),
-                comment: parts.get(12).unwrap_or(&"").to_string(),
-                magic: parts.get(13).map(|s| s.to_string()),
-            });
-        }
-    }
-
-    Ok(deals)
+fn prepare_analysis(args: &Value) -> Result<(Vec<Deal>, Metrics, DealAnalyzer, String)> {
+    let (deals, metrics, report_dir) = resolve_report(args)?;
+    Ok((deals, metrics, DealAnalyzer::new(), report_dir))
 }
 
 // ── Composite analytics ───────────────────────────────────────────────────────
 
 pub async fn handle_analyze_report(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, metrics, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, metrics, analyzer, report_dir) = prepare_analysis(args)?;
 
     let requested: Option<HashSet<String>> = args.get("analytics")
         .and_then(|v| v.as_array())
@@ -111,7 +92,7 @@ pub async fn handle_analyze_report(_config: &Config, args: &Value) -> Result<Val
     if req("streak_analysis")  { result["streak_analysis"]  = json!(analyzer.streak_analysis(&deals)); }
     if req("concurrent_peak")  { result["concurrent_peak"]  = json!(analyzer.concurrent_peak(&deals)); }
 
-    let analysis_path = Path::new(report_dir).join("analysis.json");
+    let analysis_path = Path::new(&report_dir).join("analysis.json");
     fs::write(&analysis_path, serde_json::to_string_pretty(&result)?)?;
 
     Ok(ok_response(json!({
@@ -123,10 +104,10 @@ pub async fn handle_analyze_report(_config: &Config, args: &Value) -> Result<Val
 }
 
 pub async fn handle_compare_baseline(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
+    let (_, _, _, report_dir) = prepare_analysis(args)?;
 
     let baseline_path = Path::new("config/baseline.json");
-    let metrics_path = Path::new(report_dir).join("metrics.json");
+    let metrics_path = Path::new(&report_dir).join("metrics.json");
 
     if !baseline_path.exists() {
         return Ok(ok_response(json!("No baseline.json found in config/")));
@@ -150,93 +131,78 @@ pub async fn handle_compare_baseline(_config: &Config, args: &Value) -> Result<V
 // ── Granular analytics handlers ───────────────────────────────────────────────
 
 pub async fn handle_analyze_monthly_pnl(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "monthly_pnl": analyzer.monthly_pnl(&deals) })))
 }
 
 pub async fn handle_analyze_drawdown_events(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, metrics, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, metrics, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "drawdown_events": analyzer.reconstruct_dd_events(&deals, &metrics) })))
 }
 
 pub async fn handle_analyze_top_losses(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "limit": limit, "top_losses": analyzer.top_losses(&deals, limit) })))
 }
 
 pub async fn handle_analyze_loss_sequences(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "loss_sequences": analyzer.loss_sequences(&deals) })))
 }
 
 pub async fn handle_analyze_position_pairs(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "position_pairs": analyzer.position_pairs(&deals) })))
 }
 
 pub async fn handle_analyze_direction_bias(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "direction_bias": analyzer.direction_bias(&deals) })))
 }
 
 pub async fn handle_analyze_streaks(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "streak_analysis": analyzer.streak_analysis(&deals) })))
 }
 
 pub async fn handle_analyze_concurrent_peak(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "concurrent_peak": analyzer.concurrent_peak(&deals) })))
 }
 
 pub async fn handle_analyze_profit_distribution(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "profit_distribution": analyzer.profit_distribution(&deals) })))
 }
 
 pub async fn handle_analyze_time_performance(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "time_performance": analyzer.time_performance(&deals) })))
 }
 
 pub async fn handle_analyze_hold_time_distribution(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "hold_time_analysis": analyzer.hold_time_analysis(&deals) })))
 }
 
 pub async fn handle_analyze_layer_performance(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "layer_performance": analyzer.layer_performance(&deals) })))
 }
 
 pub async fn handle_analyze_volume_vs_profit(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "volume_analysis": analyzer.volume_analysis(&deals) })))
 }
 
 pub async fn handle_analyze_costs(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, _, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "cost_analysis": analyzer.cost_analysis(&deals) })))
 }
 
 pub async fn handle_analyze_efficiency(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, metrics, analyzer) = prepare_analysis(report_dir)?;
+    let (deals, metrics, analyzer, _) = prepare_analysis(args)?;
     Ok(ok_response(json!({ "success": true, "efficiency_analysis": analyzer.efficiency_analysis(&deals, &metrics) })))
 }
 
@@ -263,8 +229,7 @@ fn is_closed_trade(d: &Deal) -> bool {
 }
 
 pub async fn handle_list_deals(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
-    let (deals, _) = load_report_data(report_dir)?;
+    let (deals, _, _, _) = prepare_analysis(args)?;
 
     let deal_type  = args.get("deal_type").and_then(|v| v.as_str());
     let min_profit = args.get("min_profit").and_then(|v| v.as_f64());
@@ -299,11 +264,9 @@ pub async fn handle_list_deals(_config: &Config, args: &Value) -> Result<Value> 
 }
 
 pub async fn handle_search_deals_by_comment(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
     let query = required_str(args, "query")?;
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-
-    let (deals, _) = load_report_data(report_dir)?;
+    let (deals, _, _, _) = prepare_analysis(args)?;
     let query_lower = query.to_lowercase();
 
     let mut filtered: Vec<&Deal> = deals.iter()
@@ -322,11 +285,9 @@ pub async fn handle_search_deals_by_comment(_config: &Config, args: &Value) -> R
 }
 
 pub async fn handle_search_deals_by_magic(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = required_str(args, "report_dir")?;
     let magic = required_str(args, "magic")?;
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-
-    let (deals, _) = load_report_data(report_dir)?;
+    let (deals, _, _, _) = prepare_analysis(args)?;
 
     let mut filtered: Vec<&Deal> = deals.iter()
         .filter(|d| is_closed_trade(d) && d.magic.as_ref().map(|m| m.contains(magic)).unwrap_or(false))
@@ -343,6 +304,5 @@ pub async fn handle_search_deals_by_magic(_config: &Config, args: &Value) -> Res
     })))
 }
 
-// suppress unused warning — err_response is available for future handlers
 #[allow(dead_code)]
-fn _use_err_response() { let _ = err_response(""); }
+fn _err_response_available() { let _ = err_response(""); }

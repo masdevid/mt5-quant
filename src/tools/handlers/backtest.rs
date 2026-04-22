@@ -147,12 +147,12 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
         }));
     }
 
-    // Date defaulting: past complete calendar month
+    // Date defaulting: current month
     let (from_date, to_date) = {
         let f = args.get("from_date").and_then(|v| v.as_str()).unwrap_or("");
         let t = args.get("to_date").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() || t.is_empty() {
-            super::past_complete_month()
+            super::current_month()
         } else {
             (f.to_string(), t.to_string())
         }
@@ -176,6 +176,7 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
         kill_existing: args.get("kill_existing").and_then(|v| v.as_bool()).unwrap_or(false),
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
+        startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
     };
 
     let pipeline = BacktestPipeline::new(config.clone());
@@ -212,13 +213,13 @@ pub async fn handle_run_backtest_only(config: &Config, args: &Value) -> Result<V
     handle_run_backtest(config, &args).await
 }
 
-pub async fn handle_launch_backtest(config: &Config, args: &Value) -> Result<Value> {
+pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
     let expert = args.get("expert")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
     // Run pre-flight check
-    let preflight = BacktestPreflight::check(config, expert);
+    let preflight = BacktestPreflight::check(&handler.config, expert);
     
     // Check account session
     if preflight.account.is_none() {
@@ -237,7 +238,7 @@ pub async fn handle_launch_backtest(config: &Config, args: &Value) -> Result<Val
         .unwrap_or("");
 
     let symbol = if requested_symbol.is_empty() {
-        config.backtest_symbol.clone()
+        handler.config.backtest_symbol.clone()
             .or_else(|| preflight.available_symbols.first().cloned())
             .unwrap_or_else(|| "EURUSD".to_string())
     } else {
@@ -260,7 +261,7 @@ pub async fn handle_launch_backtest(config: &Config, args: &Value) -> Result<Val
         let f = args.get("from_date").and_then(|v| v.as_str()).unwrap_or("");
         let t = args.get("to_date").and_then(|v| v.as_str()).unwrap_or("");
         if f.is_empty() || t.is_empty() {
-            super::past_complete_month()
+            super::current_month()
         } else {
             (f.to_string(), t.to_string())
         }
@@ -284,9 +285,14 @@ pub async fn handle_launch_backtest(config: &Config, args: &Value) -> Result<Val
         kill_existing: false,
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
+        startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
     };
 
-    let pipeline = BacktestPipeline::new(config.clone());
+    let pipeline = if let Some(ref callback) = handler.notification_callback {
+        BacktestPipeline::with_notification_callback(handler.config.clone(), callback.clone())
+    } else {
+        BacktestPipeline::new(handler.config.clone())
+    };
     let job = pipeline.launch_backtest(params).await?;
 
     Ok(json!({

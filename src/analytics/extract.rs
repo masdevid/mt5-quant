@@ -15,7 +15,7 @@ impl ReportExtractor {
 
     pub fn extract(&self, report_path: &str, output_dir: &str) -> Result<ExtractionResult> {
         let format = Self::detect_format(report_path);
-        
+
         let (metrics, deals) = match format {
             ReportFormat::Xml => self.parse_xml(report_path)?,
             ReportFormat::Html => self.parse_html(report_path)?,
@@ -24,20 +24,17 @@ impl ReportExtractor {
         fs::create_dir_all(output_dir)?;
 
         let metrics_path = Path::new(output_dir).join("metrics.json");
-        let deals_csv_path = Path::new(output_dir).join("deals.csv");
-        let deals_json_path = Path::new(output_dir).join("deals.json");
-
         self.write_metrics(&metrics, &metrics_path)?;
-        self.write_deals_json(&deals, &deals_json_path)?;
-        self.write_deals_csv(&deals, &deals_csv_path)?;
 
         Ok(ExtractionResult {
             metrics,
             deals,
             metrics_path,
-            deals_csv_path,
-            deals_json_path,
         })
+    }
+
+    pub fn write_deals_to_csv(&self, deals: &[Deal], path: &Path) -> Result<()> {
+        self.write_deals_csv(deals, path)
     }
 
     fn detect_format(path: &str) -> ReportFormat {
@@ -215,13 +212,6 @@ impl ReportExtractor {
         Ok(())
     }
 
-    fn write_deals_json(&self, deals: &[Deal], path: &Path) -> Result<()> {
-        let json = serde_json::to_string_pretty(deals)?;
-        let mut file = File::create(path)?;
-        file.write_all(json.as_bytes())?;
-        Ok(())
-    }
-
     fn write_deals_csv(&self, deals: &[Deal], path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
         writeln!(file, "time,deal,symbol,type,entry,volume,price,order,commission,swap,profit,balance,comment")?;
@@ -279,10 +269,6 @@ pub struct ExtractionResult {
     pub deals: Vec<Deal>,
     #[allow(dead_code)]
     pub metrics_path: PathBuf,
-    #[allow(dead_code)]
-    pub deals_csv_path: PathBuf,
-    #[allow(dead_code)]
-    pub deals_json_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy)]

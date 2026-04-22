@@ -12,9 +12,13 @@ use anyhow::Result;
 use clap::Parser;
 use serde_json::{json, Value};
 use std::io::{stdout, Write};
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{info, error};
+
+use crate::models::Config;
+use crate::pipeline::backtest::{BacktestPipeline, BacktestParams};
 
 #[derive(Parser)]
 #[command(name = "mt5-quant")]
@@ -27,6 +31,18 @@ struct Cli {
     /// Run on TCP port for debugging
     #[arg(short, long)]
     port: Option<u16>,
+    
+    /// Test backtest launch performance (direct Rust call, not MCP)
+    #[arg(long)]
+    test_launch: bool,
+    
+    /// EA name for test launch
+    #[arg(long)]
+    ea: Option<String>,
+    
+    /// Startup delay for test launch (default: 10)
+    #[arg(long)]
+    startup_delay: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -88,6 +104,11 @@ async fn main() -> Result<()> {
     
     let cli = Cli::parse();
     
+    if cli.test_launch {
+        run_test_launch(cli.ea, cli.startup_delay).await?;
+        return Ok(());
+    }
+    
     if let Some(port) = cli.port {
         run_tcp_server(port).await?;
     } else {
@@ -97,10 +118,82 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Result<()> {
+    let expert = ea.ok_or_else(|| anyhow::anyhow!("--ea is required for test launch"))?;
+    let delay = startup_delay.unwrap_or(10);
+    
+    println!("Testing MT5 backtest launch optimizations...");
+    println!("==============================================");
+    println!("EA: {}", expert);
+    println!("Startup delay: {}s", delay);
+    
+    let config = Config::load()?;
+    
+    let params = BacktestParams {
+        expert: expert.clone(),
+        symbol: "XAUUSD".to_string(),
+        from_date: "2024.01.01".to_string(),
+        to_date: "2024.01.31".to_string(),
+        timeframe: "M5".to_string(),
+        deposit: 10000,
+        model: 0,
+        leverage: 500,
+        set_file: None,
+        skip_compile: true,
+        skip_clean: false,
+        skip_analyze: true,
+        deep_analyze: false,
+        shutdown: false,
+        kill_existing: false,
+        timeout: 900,
+        gui: false,
+        startup_delay_secs: delay,
+    };
+    
+    let pipeline = BacktestPipeline::new(config);
+    
+    println!("\nLaunching backtest...");
+    let start = Instant::now();
+    match pipeline.launch_backtest(params).await {
+        Ok(job) => {
+            let elapsed = start.elapsed();
+            println!("✓ Launch completed in {:.2}s", elapsed.as_secs_f64());
+            println!("  Report ID: {}", job.report_id);
+            println!("  Report dir: {}", job.report_dir);
+            println!("\nUse get_backtest_status to monitor progress.");
+        }
+        Err(e) => {
+            let elapsed = start.elapsed();
+            println!("✗ Launch failed after {:.2}s: {}", elapsed.as_secs_f64(), e);
+        }
+    }
+    
+    println!("\n==============================================");
+    println!("Test complete.");
+    
+    Ok(())
+}
+
 async fn run_stdio_server() -> Result<()> {
     info!("Starting MT5-Quant MCP server on stdio");
     
     let server = std::sync::Arc::new(mcp_server::McpServer::new());
+    let (notification_tx, mut notification_rx) = tokio::sync::mpsc::unbounded_channel::<mcp_server::Notification>();
+    server.set_notification_sender(notification_tx).await;
+    
+    // Spawn notification sender task
+    tokio::spawn(async move {
+        while let Some(notification) = notification_rx.recv().await {
+            let notification_json = json!({
+                "jsonrpc": "2.0",
+                "method": notification.method,
+                "params": notification.params,
+            });
+            println!("{}", notification_json);
+            let _ = stdout().flush();
+        }
+    });
+    
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut line = String::new();
     

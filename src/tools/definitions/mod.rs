@@ -112,6 +112,7 @@ pub fn get_tools_list() -> Value {
         reports::tool_search_reports_by_notes(),
         reports::tool_get_reports_by_set_file(),
         reports::tool_get_comparable_reports(),
+        reports::tool_export_deals_csv(),
     ];
 
     serde_json::json!(tools)

@@ -1,8 +1,10 @@
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::{models::Config as ModelsConfig, tools::ToolHandler, McpError, McpRequest, McpResponse};
+
+type NotificationCallback = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
 /// Auto-verify result stored after first initialization
 #[derive(Debug, Clone)]
@@ -13,11 +15,17 @@ struct AutoVerifyResult {
     config_path: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct Notification {
+    pub method: String,
+    pub params: Value,
+}
+
 pub struct McpServer {
     initialized: Arc<Mutex<bool>>,
-    tool_handler: Arc<ToolHandler>,
+    tool_handler: Arc<Mutex<Option<ToolHandler>>>,
     auto_verify_result: Arc<Mutex<Option<AutoVerifyResult>>>,
+    notification_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Notification>>>>,
 }
 
 impl McpServer {
@@ -25,9 +33,35 @@ impl McpServer {
         let config = ModelsConfig::load().unwrap_or_default();
         Self {
             initialized: Arc::new(Mutex::new(false)),
-            tool_handler: Arc::new(ToolHandler::new(config)),
+            tool_handler: Arc::new(Mutex::new(Some(ToolHandler::new(config)))),
             auto_verify_result: Arc::new(Mutex::new(None)),
+            notification_tx: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub async fn set_notification_sender(&self, tx: mpsc::UnboundedSender<Notification>) {
+        let mut guard = self.notification_tx.lock().await;
+        *guard = Some(tx.clone());
+        
+        // Update tool handler with notification callback
+        let tx_clone = tx.clone();
+        let callback = Arc::new(move |method: &str, params: serde_json::Value| {
+            let _ = tx_clone.send(Notification {
+                method: method.to_string(),
+                params,
+            });
+        });
+        
+        let config = ModelsConfig::load().unwrap_or_default();
+        let new_handler = ToolHandler::with_notification_callback(config, callback);
+        
+        let mut handler_guard = self.tool_handler.lock().await;
+        *handler_guard = Some(new_handler);
+    }
+
+    pub async fn get_notification_sender(&self) -> Option<mpsc::UnboundedSender<Notification>> {
+        let guard = self.notification_tx.lock().await;
+        guard.clone()
     }
 
     /// Run verify_setup in background - non blocking
@@ -247,12 +281,27 @@ impl McpServer {
     }
 
     async fn handle_tool_call(&self, tool_name: &str, arguments: &Value) -> Value {
-        self.tool_handler.handle(tool_name, arguments).await.unwrap_or_else(|e| json!({
-            "content": [{
-                "type": "text",
-                "text": format!("Tool execution failed: {}", e)
-            }],
-            "isError": true
-        }))
+        let handler_guard = self.tool_handler.lock().await;
+        let handler = handler_guard.as_ref().cloned();
+        drop(handler_guard);
+        
+        match handler {
+            Some(h) => {
+                h.handle(tool_name, arguments).await.unwrap_or_else(|e| json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Tool execution failed: {}", e)
+                    }],
+                    "isError": true
+                }))
+            }
+            None => json!({
+                "content": [{
+                    "type": "text",
+                    "text": "Tool handler not initialized"
+                }],
+                "isError": true
+            })
+        }
     }
 }

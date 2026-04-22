@@ -278,3 +278,17 @@ pub fn tool_get_comparable_reports() -> Value {
         }
     })
 }
+
+pub fn tool_export_deals_csv() -> Value {
+    json!({
+        "name": "export_deals_csv",
+        "description": "Export deals for a report to a CSV file on demand. Deals are stored in the database — use this to get a CSV file for external tools.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "report_id": { "type": "string", "description": "Report ID to export (default: latest report)" },
+                "output_path": { "type": "string", "description": "File path for the CSV output (default: <report_dir>/deals.csv)" }
+            }
+        }
+    })
+}

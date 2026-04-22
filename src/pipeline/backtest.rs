@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Result};
 use chrono;
+use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 use crate::analytics::{DealAnalyzer, ReportExtractor};
@@ -11,11 +13,14 @@ use crate::models::config::Config;
 use crate::models::report::{PipelineMetadata, FilePaths, BacktestJob};
 use crate::storage::{ReportDb, ReportEntry};
 
+type NotificationCallback = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+
 pub struct BacktestPipeline {
     config: Config,
     compiler: MqlCompiler,
     extractor: ReportExtractor,
     analyzer: DealAnalyzer,
+    notification_callback: Option<NotificationCallback>,
 }
 
 pub struct BacktestParams {
@@ -38,6 +43,7 @@ pub struct BacktestParams {
     pub kill_existing: bool,
     pub timeout: u64,
     pub gui: bool,
+    pub startup_delay_secs: u64,
 }
 
 pub struct PipelineResult {
@@ -58,6 +64,21 @@ impl BacktestPipeline {
             compiler,
             extractor,
             analyzer,
+            notification_callback: None,
+        }
+    }
+
+    pub fn with_notification_callback(config: Config, callback: NotificationCallback) -> Self {
+        let compiler = MqlCompiler::new(config.clone());
+        let extractor = ReportExtractor::new();
+        let analyzer = DealAnalyzer::new();
+        
+        Self {
+            config,
+            compiler,
+            extractor,
+            analyzer,
+            notification_callback: Some(callback),
         }
     }
 
@@ -117,8 +138,8 @@ impl BacktestPipeline {
         let duration = (chrono::Utc::now() - start_time).num_seconds();
         self.save_metadata(&params, &report_dir, duration, extraction.deals.is_empty()).await?;
 
-        // Register in the SQLite report registry.
-        self.register_in_db(
+        // Register in the SQLite report registry and store deals.
+        let db = self.register_in_db(
             &report_id,
             &params,
             &report_dir,
@@ -128,6 +149,12 @@ impl BacktestPipeline {
             duration,
         )
         .await;
+
+        if let Some(db) = db {
+            if let Err(e) = db.insert_deals(&report_id, &extraction.deals) {
+                tracing::warn!("Failed to store deals in DB: {}", e);
+            }
+        }
 
         let message = if extraction.deals.is_empty() {
             "Backtest completed successfully, but EA did not execute any trades during this period".to_string()
@@ -181,7 +208,7 @@ impl BacktestPipeline {
         let reports_dir = mt5_dir.join("reports");
         fs::create_dir_all(&reports_dir)?;
 
-        // Write config files
+        // Write params via /config: (triggers tester) and terminal.ini (redundancy).
         let ini_content = self.build_backtest_ini(&params, &report_id)?;
         let config_host = wine_prefix.join("drive_c").join("backtest_config.ini");
         fs::write(&config_host, ini_content.as_bytes())?;
@@ -225,7 +252,120 @@ impl BacktestPipeline {
             tracing::warn!("Failed to init report DB: {}", e);
         }
 
+        // Spawn background task to monitor completion and update status
+        let report_dir_clone = report_dir.clone();
+        let expected_report_clone = expected_report.clone();
+        let timeout_secs = params.timeout;
+        let report_id_clone = report_id.clone();
+        let notification_callback = self.notification_callback.clone();
+        tokio::spawn(async move {
+            Self::monitor_backtest_completion(
+                report_dir_clone,
+                expected_report_clone,
+                timeout_secs,
+                report_id_clone,
+                notification_callback,
+            ).await;
+        });
+
         Ok(job)
+    }
+
+    /// Background task to monitor backtest completion and update status file.
+    async fn monitor_backtest_completion(
+        report_dir: PathBuf,
+        expected_report: PathBuf,
+        timeout_secs: u64,
+        report_id: String,
+        notification_callback: Option<NotificationCallback>,
+    ) {
+        let start = tokio::time::Instant::now();
+        let deadline = start + Duration::from_secs(timeout_secs);
+        let grace_period = Duration::from_secs(30);
+        let poll_start = std::time::SystemTime::now();
+
+        loop {
+            let _elapsed = start.elapsed().as_secs();
+
+            // Check for report file
+            for ext in &[".htm", ".htm.xml", ".html"] {
+                let candidate = expected_report.with_extension(ext.trim_start_matches('.'));
+                if candidate.exists() {
+                    tracing::info!("Backtest {} completed: report found at {}", report_id, candidate.display());
+                    Self::update_job_status(&report_dir, "completed", Some(candidate.to_string_lossy().to_string())).await;
+                    if let Some(ref callback) = notification_callback {
+                        callback("backtest_completed", json!({
+                            "report_id": report_id,
+                            "report_path": candidate.to_string_lossy().to_string(),
+                            "status": "completed"
+                        }));
+                    }
+                    return;
+                }
+            }
+
+            // Check process liveness after grace period
+            let in_grace = start.elapsed() <= grace_period;
+            let mt5_alive = Self::is_mt5_running();
+
+            if !in_grace && !mt5_alive {
+                // MT5 exited without report - check for any newer report
+                if let Some(path) = Self::find_newest_report(expected_report.parent().unwrap(), poll_start) {
+                    tracing::info!("Backtest {} completed: found fallback report {}", report_id, path.display());
+                    Self::update_job_status(&report_dir, "completed", Some(path.to_string_lossy().to_string())).await;
+                    if let Some(ref callback) = notification_callback {
+                        callback("backtest_completed", json!({
+                            "report_id": report_id,
+                            "report_path": path.to_string_lossy().to_string(),
+                            "status": "completed"
+                        }));
+                    }
+                } else {
+                    tracing::warn!("Backtest {} failed: MT5 exited without producing a report", report_id);
+                    Self::update_job_status(&report_dir, "failed", None).await;
+                    if let Some(ref callback) = notification_callback {
+                        callback("backtest_failed", json!({
+                            "report_id": report_id,
+                            "status": "failed",
+                            "reason": "MT5 exited without producing a report"
+                        }));
+                    }
+                }
+                return;
+            }
+
+            if tokio::time::Instant::now() > deadline {
+                tracing::warn!("Backtest {} timed out after {} seconds", report_id, timeout_secs);
+                Self::update_job_status(&report_dir, "timeout", None).await;
+                if let Some(ref callback) = notification_callback {
+                    callback("backtest_timeout", json!({
+                        "report_id": report_id,
+                        "status": "timeout",
+                        "timeout_seconds": timeout_secs
+                    }));
+                }
+                return;
+            }
+
+            sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// Update job status in job.json file.
+    async fn update_job_status(report_dir: &Path, status: &str, report_path: Option<String>) {
+        let job_path = report_dir.join("job.json");
+        if let Ok(job_json) = fs::read_to_string(&job_path) {
+            if let Ok(mut job) = serde_json::from_str::<serde_json::Value>(&job_json) {
+                job["status"] = serde_json::Value::String(status.to_string());
+                job["completed_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+                if let Some(path) = report_path {
+                    job["actual_report_path"] = serde_json::Value::String(path);
+                }
+                if let Ok(updated) = serde_json::to_string_pretty(&job) {
+                    let _ = fs::write(&job_path, updated);
+                }
+            }
+        }
     }
 
     /// Move equity chart images (*.png, *.gif) from MT5's reports dir to OS temp,
@@ -289,11 +429,11 @@ impl BacktestPipeline {
         set_snapshot: Option<&Path>,
         metrics: &crate::models::metrics::Metrics,
         duration: i64,
-    ) {
+    ) -> Option<ReportDb> {
         let db = ReportDb::new(&Config::db_path());
         if let Err(e) = db.init() {
             tracing::warn!("Failed to init report DB: {}", e);
-            return;
+            return None;
         }
 
         let entry = ReportEntry {
@@ -327,7 +467,10 @@ impl BacktestPipeline {
 
         if let Err(e) = db.insert(&entry) {
             tracing::warn!("Failed to register report in DB: {}", e);
+            return None;
         }
+
+        Some(db)
     }
 
     async fn compile_ea(&self, expert: &str, timeout_secs: u64) -> Result<()> {
@@ -451,12 +594,8 @@ impl BacktestPipeline {
         let reports_dir = mt5_dir.join("reports");
         fs::create_dir_all(&reports_dir)?;
 
-        // Write backtest_config.ini (used by wine64 shell-script launch via /config:)
-        // and also patch terminal.ini so the Strategy Tester panel shows the right
-        // settings if the user opens MT5 manually.
+        // Write params via /config: (triggers tester auto-start) and terminal.ini (redundancy).
         let ini_content = self.build_backtest_ini(params, report_id)?;
-        // Write to drive_c root (C:\backtest_config.ini) — no spaces in path avoids
-        // Wine argument-quoting issues when MT5 parses the /config: value.
         let config_host = wine_prefix.join("drive_c").join("backtest_config.ini");
         fs::write(&config_host, ini_content.as_bytes())?;
         self.update_terminal_ini(params, report_id)?;
@@ -477,8 +616,10 @@ impl BacktestPipeline {
             .spawn()?;
 
         // Give MT5 time to fully initialize before polling.
-        // MT5 app startup (Wine init + network auth + tester) typically takes 15–20 s.
-        sleep(Duration::from_secs(20)).await;
+        // MT5 app startup (Wine init + network auth + tester) typically takes 10–15 s.
+        // Configurable via startup_delay_secs parameter (default 10s for faster launches).
+        let delay = if params.startup_delay_secs > 0 { params.startup_delay_secs } else { 10 };
+        sleep(Duration::from_secs(delay)).await;
 
         // Poll for the report file (MT5 writes it when the backtest completes).
         // Grace period: don't check process liveness for the first 30 s after launch —
@@ -523,15 +664,21 @@ impl BacktestPipeline {
         }
     }
 
-    /// Write backtest parameters into terminal.ini [Tester] section so MT5 reads
-    /// them on startup without needing a /config: command-line argument.
+    /// Write backtest params into terminal.ini [Tester] section.
+    /// MT5 uses this when restarting — it reconnects via the saved session in common.ini
+    /// rather than requiring fresh credentials. This is more reliable than /config: alone,
+    /// which requires a password for fresh authentication.
     fn update_terminal_ini(&self, params: &BacktestParams, report_id: &str) -> Result<()> {
         let mt5_dir = self.config.mt5_dir()
             .ok_or_else(|| anyhow!("MT5 directory not configured"))?;
-        let terminal_ini = mt5_dir.join("config").join("terminal.ini");
+        // Portable mode uses config/ inside the install dir; non-portable uses the root.
+        let terminal_ini = if mt5_dir.join("config").exists() {
+            mt5_dir.join("config").join("terminal.ini")
+        } else {
+            mt5_dir.join("terminal.ini")
+        };
 
-        let raw = fs::read(&terminal_ini)
-            .unwrap_or_default();
+        let raw = fs::read(&terminal_ini).unwrap_or_default();
         let text = if raw.starts_with(&[0xFF, 0xFE]) {
             raw[2..].chunks_exact(2)
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -544,21 +691,31 @@ impl BacktestPipeline {
         };
 
         let period = match params.timeframe.as_str() {
-            "M1"  => 1u32,  "M5"  => 5,  "M15" => 15, "M30" => 30,
-            "H1"  => 60,    "H4"  => 240, "D1"  => 1440,
-            _     => 5,
+            "M1" => 1u32, "M5" => 5, "M15" => 15, "M30" => 30,
+            "H1" => 60,   "H4" => 240, "D1" => 1440,
+            _    => 5,
         };
-
         let from_ts = Self::date_str_to_unix(&params.from_date)?;
         let to_ts   = Self::date_str_to_unix(&params.to_date)?;
-
         let currency = self.config.backtest_currency.as_deref().unwrap_or("USD");
+
+        let expert_path = if let Some(experts_dir) = &self.config.experts_dir {
+            let nested = std::path::Path::new(experts_dir).join(&params.expert).join(format!("{}.mq5", params.expert));
+            if nested.exists() {
+                format!("Experts\\{}\\{}.ex5", params.expert, params.expert)
+            } else {
+                format!("Experts\\{}.ex5", params.expert)
+            }
+        } else {
+            format!("Experts\\{}.ex5", params.expert)
+        };
+
         let set_file_line = params.set_file.as_ref()
             .map(|p| format!("ExpertParameters={}\n", p))
             .unwrap_or_default();
 
         let updates: &[(&str, String)] = &[
-            ("Expert",           self.resolve_expert_path(&params.expert)),
+            ("Expert",           expert_path),
             ("Symbol",           params.symbol.clone()),
             ("Period",           period.to_string()),
             ("DateRange",        "3".into()),
@@ -577,31 +734,15 @@ impl BacktestPipeline {
             ("ShutdownTerminal", if params.shutdown { "1" } else { "0" }.into()),
         ];
 
-        let updated = Self::patch_ini_section(&text, "Tester", updates)
-            + &set_file_line;
-
+        let updated = Self::patch_ini_section(&text, "Tester", updates) + &set_file_line;
         let bom_utf16: Vec<u8> = [0xFF, 0xFE].iter().copied()
             .chain(updated.encode_utf16().flat_map(|c| c.to_le_bytes()))
             .collect();
         fs::write(&terminal_ini, bom_utf16)?;
-        tracing::info!("terminal.ini [Tester] updated for backtest {}", report_id);
+        tracing::info!("terminal.ini [Tester] updated → {}", terminal_ini.display());
         Ok(())
     }
 
-    /// Parse "YYYY.MM.DD" and return a Unix timestamp (seconds since 1970-01-01 UTC).
-    fn date_str_to_unix(date: &str) -> Result<i64> {
-        let parts: Vec<u32> = date.split('.').filter_map(|p| p.parse().ok()).collect();
-        if parts.len() != 3 {
-            return Err(anyhow!("Invalid date format: {}", date));
-        }
-        let dt = chrono::NaiveDate::from_ymd_opt(parts[0] as i32, parts[1], parts[2])
-            .ok_or_else(|| anyhow!("Invalid date: {}", date))?
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| anyhow!("Date conversion failed"))?;
-        Ok(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc).timestamp())
-    }
-
-    /// Replace or add key=value pairs in a named INI section.
     fn patch_ini_section(text: &str, section: &str, updates: &[(&str, String)]) -> String {
         let section_header = format!("[{}]", section);
         let mut result = String::with_capacity(text.len() + 256);
@@ -618,7 +759,6 @@ impl BacktestPipeline {
                 continue;
             }
             if trimmed.starts_with('[') && in_section {
-                // End of our section — flush any keys not yet written
                 for (k, v) in &pending {
                     result.push_str(&format!("{}={}\n", k, v));
                 }
@@ -637,7 +777,6 @@ impl BacktestPipeline {
             result.push_str(line);
             result.push('\n');
         }
-        // Flush remaining keys if section was at end of file
         if in_section {
             for (k, v) in &pending {
                 result.push_str(&format!("{}={}\n", k, v));
@@ -646,19 +785,33 @@ impl BacktestPipeline {
         result
     }
 
+    fn date_str_to_unix(date: &str) -> Result<i64> {
+        let parts: Vec<u32> = date.split('.').filter_map(|p| p.parse().ok()).collect();
+        if parts.len() != 3 {
+            return Err(anyhow!("Invalid date format: {}", date));
+        }
+        let dt = chrono::NaiveDate::from_ymd_opt(parts[0] as i32, parts[1], parts[2])
+            .ok_or_else(|| anyhow!("Invalid date: {}", date))?
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| anyhow!("Date conversion failed"))?;
+        Ok(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc).timestamp())
+    }
+
     /// Build the OS-appropriate command to launch MT5 with the backtest config.
     ///
-    /// - macOS MT5.app bundle: use `open -a "MetaTrader 5" --args /config:...`
-    ///   The native launcher handles Wine env setup (DYLD vars are stripped by SIP
-    ///   when set on child processes spawned from a Rust binary).
+    /// - macOS MT5.app bundle: use shell script to bypass SIP and set DYLD vars.
+    ///   Relies on terminal.ini for backtest config (more reliable than /config:).
     /// - macOS CrossOver / Linux Wine: standard WINEPREFIX + wine64 direct invocation.
+    ///   Also relies on terminal.ini for backtest config.
     fn build_wine_launch(&self, wine_exe: &str, wine_prefix: &Path) -> Result<Command> {
         if wine_exe.contains("MetaTrader 5.app") {
             // macOS MT5.app — the Swift launcher ignores --args so we can't pass
             // /config: via `open`. Instead, write a temp shell script that sets
-            // DYLD_FALLBACK_LIBRARY_PATH and invokes wine64 with /config: directly.
+            // DYLD_FALLBACK_LIBRARY_PATH and invokes wine64 directly.
             // Shell scripts bypass the SIP restriction that strips DYLD_* vars
             // when Rust spawns a codesigned binary as a direct child process.
+            // NOTE: We rely on terminal.ini for config instead of /config: because
+            // MT5.app's bundled wine64 doesn't reliably handle /config: arguments.
             let wine_bin = Path::new(wine_exe);
             let wine_root = wine_bin
                 .parent()                  // bin/
@@ -671,11 +824,13 @@ impl BacktestPipeline {
             let dyld = format!("{}:{}:/usr/lib:/usr/local/lib",
                 ext_libs.display(), wine_libs.display());
 
-            // Use host path for the exe; config at drive root to avoid spaces in path.
+            // Use host path for the exe; use /config: with backslash-escaped path
             let terminal_host = wine_prefix.join("drive_c")
                 .join("Program Files").join("MetaTrader 5").join("terminal64.exe");
-            let config_win = r"C:\backtest_config.ini";
 
+            // /config: triggers the Strategy Tester to auto-start.
+            // terminal.ini is also patched with the same params as a belt-and-suspenders.
+            let config_win = r"C:\backtest_config.ini";
             let script = format!(
                 "#!/bin/sh\n\
                  export DYLD_FALLBACK_LIBRARY_PATH='{dyld}'\n\
@@ -691,41 +846,39 @@ impl BacktestPipeline {
             );
 
             let script_path = std::env::temp_dir().join("mt5_backtest_launch.sh");
-            fs::write(&script_path, &script)?;
-            // chmod +x
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&script_path,
-                    fs::Permissions::from_mode(0o755))?;
+            
+            // Only rewrite script if it doesn't exist or content differs (optimization)
+            let needs_write = !script_path.exists() || fs::read_to_string(&script_path).map(|existing| existing != script).unwrap_or(true);
+            
+            if needs_write {
+                fs::write(&script_path, &script)?;
+                // chmod +x
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&script_path,
+                        fs::Permissions::from_mode(0o755))?;
+                }
+                tracing::debug!("Created/updated launch script: {}", script_path.display());
+            } else {
+                tracing::debug!("Reusing existing launch script: {}", script_path.display());
             }
 
-            tracing::info!("Launching MT5 via shell script: {}", script_path.display());
+            tracing::info!("Launching MT5 via shell script (terminal.ini mode): {}", script_path.display());
             let mut cmd = Command::new("/bin/sh");
             cmd.arg(&script_path);
             return Ok(cmd);
         }
 
-        // CrossOver / Linux: invoke wine64 directly with WINEPREFIX set.
-        // Params are already written to terminal.ini so no /config: arg needed.
+        // CrossOver / Linux: invoke wine64 directly with /config: to trigger the tester.
         let terminal_win_path = r"C:\Program Files\MetaTrader 5\terminal64.exe";
+        let config_win = r"C:\backtest_config.ini";
         let mut cmd = Command::new(wine_exe);
         cmd.arg(terminal_win_path)
+            .arg(format!("/config:{}", config_win))
             .env("WINEPREFIX", wine_prefix)
             .env("WINEDEBUG", "-all");
         Ok(cmd)
-    }
-
-    /// For terminal.ini: path relative to MQL5/ (e.g. `Experts\DPS21\DPS21.ex5`).
-    fn resolve_expert_path(&self, expert: &str) -> String {
-        if let Some(experts_dir) = &self.config.experts_dir {
-            let nested_ex5 = PathBuf::from(experts_dir).join(expert).join(format!("{}.ex5", expert));
-            let nested_mq5 = PathBuf::from(experts_dir).join(expert).join(format!("{}.mq5", expert));
-            if nested_ex5.exists() || nested_mq5.exists() {
-                return format!("Experts\\{}\\{}.ex5", expert, expert);
-            }
-        }
-        format!("Experts\\{}.ex5", expert)
     }
 
     /// For /config: INI: path relative to MQL5/Experts/ (e.g. `DPS21\DPS21.ex5`).
@@ -744,11 +897,17 @@ impl BacktestPipeline {
     fn build_backtest_ini(&self, params: &BacktestParams, report_id: &str) -> Result<String> {
         let mut ini = String::new();
 
+        // [Common] section: only written when explicit credentials are configured.
+        // Without it, MT5 reuses its saved session via common.ini (no password needed).
         if let Some(login) = &self.config.backtest_login {
             if let Some(server) = &self.config.backtest_server {
                 ini.push_str("[Common]\n");
                 ini.push_str(&format!("Login={}\n", login));
-                ini.push_str(&format!("Server={}\n\n", server));
+                ini.push_str(&format!("Server={}\n", server));
+                if let Some(password) = &self.config.backtest_password {
+                    ini.push_str(&format!("Password={}\n", password));
+                }
+                ini.push_str("\n");
             }
         }
 
@@ -796,11 +955,22 @@ impl BacktestPipeline {
 
         tracing::info!("Stopping existing MT5 instance...");
         // SIGKILL immediately — MT5 holds no state we care about preserving.
+        let mut killed_any = false;
         for pat in &patterns {
-            let _ = Command::new("pkill").args(["-KILL", "-f", pat.as_str()]).output();
+            let result = Command::new("pkill").args(["-KILL", "-f", pat.as_str()]).output();
+            if result.map(|o| o.status.success()).unwrap_or(false) {
+                killed_any = true;
+            }
         }
-        let _ = Command::new("pkill").args(["-KILL", "-f", "wineserver"]).output();
-        sleep(Duration::from_secs(3)).await;
+        let wineserver_result = Command::new("pkill").args(["-KILL", "-f", "wineserver"]).output();
+        if wineserver_result.map(|o| o.status.success()).unwrap_or(false) {
+            killed_any = true;
+        }
+        
+        // Only sleep if we actually killed something - skip if no processes were running
+        if killed_any {
+            sleep(Duration::from_secs(2)).await; // Reduced from 3s to 2s
+        }
 
         Ok(())
     }

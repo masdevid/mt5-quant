@@ -3,6 +3,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::models::Deal;
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ReportEntry {
     pub id: String,
@@ -67,6 +69,25 @@ impl ReportDb {
         }
         let conn = self.connect()?;
         conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS deals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                time TEXT NOT NULL,
+                deal TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                deal_type TEXT NOT NULL,
+                entry TEXT NOT NULL,
+                volume REAL NOT NULL,
+                price REAL NOT NULL,
+                order_id TEXT NOT NULL,
+                commission REAL NOT NULL,
+                swap REAL NOT NULL,
+                profit REAL NOT NULL,
+                balance REAL NOT NULL,
+                comment TEXT NOT NULL,
+                magic TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_deals_report_id ON deals(report_id);
             CREATE TABLE IF NOT EXISTS reports (
                 id TEXT PRIMARY KEY,
                 expert TEXT NOT NULL,
@@ -100,6 +121,69 @@ impl ReportDb {
             CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
         ")?;
         Ok(())
+    }
+
+    pub fn insert_deals(&self, report_id: &str, deals: &[Deal]) -> Result<()> {
+        if deals.is_empty() {
+            return Ok(());
+        }
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "INSERT INTO deals (report_id, time, deal, symbol, deal_type, entry, volume, price, \
+             order_id, commission, swap, profit, balance, comment, magic) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        )?;
+        for d in deals {
+            stmt.execute(params![
+                report_id,
+                d.time,
+                d.deal,
+                d.symbol,
+                d.deal_type,
+                d.entry,
+                d.volume,
+                d.price,
+                d.order,
+                d.commission,
+                d.swap,
+                d.profit,
+                d.balance,
+                d.comment,
+                d.magic,
+            ])?;
+        }
+        Ok(())
+    }
+
+    pub fn get_deals(&self, report_id: &str) -> Result<Vec<Deal>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT time, deal, symbol, deal_type, entry, volume, price, order_id, \
+             commission, swap, profit, balance, comment, magic \
+             FROM deals WHERE report_id = ? ORDER BY id ASC",
+        )?;
+        let deals: Vec<Deal> = stmt
+            .query_map([report_id], |row| {
+                Ok(Deal {
+                    time: row.get(0)?,
+                    deal: row.get(1)?,
+                    symbol: row.get(2)?,
+                    deal_type: row.get(3)?,
+                    entry: row.get(4)?,
+                    volume: row.get(5)?,
+                    price: row.get(6)?,
+                    order: row.get(7)?,
+                    commission: row.get(8)?,
+                    swap: row.get(9)?,
+                    profit: row.get(10)?,
+                    balance: row.get(11)?,
+                    comment: row.get(12)?,
+                    magic: row.get(13)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(deals)
     }
 
     pub fn insert(&self, entry: &ReportEntry) -> Result<()> {
@@ -338,6 +422,57 @@ impl ReportDb {
 
         let entry = stmt
             .query_map([], |row| {
+                let tags_json: String = row.get(23)?;
+                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                Ok(ReportEntry {
+                    id: row.get(0)?,
+                    expert: row.get(1)?,
+                    symbol: row.get(2)?,
+                    timeframe: row.get(3)?,
+                    model: row.get(4)?,
+                    from_date: row.get(5)?,
+                    to_date: row.get(6)?,
+                    created_at: row.get(7)?,
+                    set_file_original: row.get(8)?,
+                    set_snapshot_path: row.get(9)?,
+                    report_dir: row.get(10)?,
+                    charts_dir: row.get(11)?,
+                    net_profit: row.get(12)?,
+                    profit_factor: row.get(13)?,
+                    max_dd_pct: row.get(14)?,
+                    sharpe_ratio: row.get(15)?,
+                    total_trades: row.get(16)?,
+                    win_rate_pct: row.get(17)?,
+                    recovery_factor: row.get(18)?,
+                    deposit: row.get(19)?,
+                    currency: row.get(20)?,
+                    leverage: row.get(21)?,
+                    duration_seconds: row.get(22)?,
+                    tags,
+                    notes: row.get(24)?,
+                    verdict: row.get(25)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .next();
+
+        Ok(entry)
+    }
+
+    /// Get a specific report by its report_dir path (exact match)
+    pub fn get_by_report_dir(&self, report_dir: &str) -> Result<Option<ReportEntry>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, expert, symbol, timeframe, model, from_date, to_date, \
+            created_at, set_file_original, set_snapshot_path, report_dir, charts_dir, \
+            net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
+            win_rate_pct, recovery_factor, deposit, currency, leverage, \
+            duration_seconds, tags, notes, verdict \
+            FROM reports WHERE report_dir = ?"
+        )?;
+
+        let entry = stmt
+            .query_map([report_dir], |row| {
                 let tags_json: String = row.get(23)?;
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                 Ok(ReportEntry {

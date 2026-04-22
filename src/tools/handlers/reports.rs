@@ -3,6 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use crate::analytics::ReportExtractor;
 use crate::models::Config;
 use crate::storage::{ReportDb, ReportFilters};
 
@@ -844,6 +845,48 @@ pub async fn handle_get_comparable_reports(args: &Value) -> Result<Value> {
             "exclude_id": exclude_id,
             "matched": reports.len(),
             "reports": reports,
+        }).to_string() }],
+        "isError": false
+    }))
+}
+
+pub async fn handle_export_deals_csv(_config: &Config, args: &Value) -> Result<Value> {
+    let db = ReportDb::new(&Config::db_path());
+    if let Err(e) = db.init() {
+        return Ok(json!({ "content": [{ "type": "text", "text": format!("DB error: {}", e) }], "isError": true }));
+    }
+
+    let report_id_opt = args.get("report_id").and_then(|v| v.as_str());
+    let entry = match report_id_opt {
+        Some(id) => db.get_by_id(id)?,
+        None => db.get_latest()?,
+    };
+
+    let entry = match entry {
+        Some(e) => e,
+        None => return Ok(json!({ "content": [{ "type": "text", "text": "No report found" }], "isError": true })),
+    };
+
+    let deals = db.get_deals(&entry.id)?;
+    if deals.is_empty() {
+        return Ok(json!({ "content": [{ "type": "text", "text": format!("No deals stored for report {}", entry.id) }], "isError": false }));
+    }
+
+    let output_path = match args.get("output_path").and_then(|v| v.as_str()) {
+        Some(p) => std::path::PathBuf::from(p),
+        None => Path::new(&entry.report_dir).join("deals.csv"),
+    };
+
+    let extractor = ReportExtractor::new();
+    extractor.write_deals_to_csv(&deals, &output_path)
+        .map_err(|e| anyhow::anyhow!("Failed to write CSV: {}", e))?;
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "success": true,
+            "report_id": entry.id,
+            "deals_count": deals.len(),
+            "output_path": output_path.to_string_lossy(),
         }).to_string() }],
         "isError": false
     }))

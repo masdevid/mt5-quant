@@ -97,6 +97,7 @@ pub struct Config {
     pub reports_dir: Option<String>,
     pub backtest_login: Option<String>,
     pub backtest_server: Option<String>,
+    pub backtest_password: Option<String>,
     pub project_dir: Option<String>,
 }
 
@@ -123,6 +124,7 @@ impl Default for Config {
             reports_dir: None,
             backtest_login: None,
             backtest_server: None,
+            backtest_password: None,
             project_dir: None,
         }
     }
@@ -404,6 +406,7 @@ impl Config {
             reports_dir:          map.get("reports_dir").cloned(),
             backtest_login:       map.get("backtest_login").cloned(),
             backtest_server:      map.get("backtest_server").cloned(),
+            backtest_password:   map.get("backtest_password").cloned(),
             project_dir:          map.get("project_dir").cloned(),
         })
     }
@@ -430,6 +433,7 @@ impl Config {
             "reports_dir"        => self.reports_dir.clone().unwrap_or_else(|| "reports".to_string()),
             "backtest_login"     => self.backtest_login.clone().unwrap_or_default(),
             "backtest_server"    => self.backtest_server.clone().unwrap_or_default(),
+            "backtest_password"  => self.backtest_password.clone().unwrap_or_default(),
             "project_dir"        => self.project_dir.clone().unwrap_or_default(),
             _                    => String::new(),
         }

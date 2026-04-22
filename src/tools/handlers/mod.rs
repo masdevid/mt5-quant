@@ -2,9 +2,11 @@ use anyhow::Result;
 use chrono::Datelike;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::models::Config;
+
+type NotificationCallback = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
 mod system;
 mod experts;
@@ -22,14 +24,19 @@ mod utility;
 pub(crate) static LATEST_VERSION: OnceLock<Option<String>> = OnceLock::new();
 static BACKGROUND_CHECK_SPAWNED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct ToolHandler {
     pub config: Config,
+    pub notification_callback: Option<NotificationCallback>,
 }
 
 impl ToolHandler {
     pub fn new(config: Config) -> Self {
-        Self { config }
+        Self { config, notification_callback: None }
+    }
+
+    pub fn with_notification_callback(config: Config, callback: NotificationCallback) -> Self {
+        Self { config, notification_callback: Some(callback) }
     }
 
     pub async fn handle(&self, name: &str, args: &Value) -> Result<Value> {
@@ -65,7 +72,7 @@ impl ToolHandler {
             "run_backtest" => backtest::handle_run_backtest(&self.config, args).await,           // Full: compile + clean + backtest + extract + analyze
             "run_backtest_quick" => backtest::handle_run_backtest_quick(&self.config, args).await, // Quick: skip compile, do backtest + extract + analyze
             "run_backtest_only" => backtest::handle_run_backtest_only(&self.config, args).await,  // Minimal: skip compile, do backtest + extract only
-            "launch_backtest" => backtest::handle_launch_backtest(&self.config, args).await,     // Fire-and-forget mode
+            "launch_backtest" => backtest::handle_launch_backtest(self, args).await,     // Fire-and-forget mode
             "get_backtest_status" => backtest::handle_get_backtest_status(&self.config, args).await,
             "cache_status" => backtest::handle_cache_status(&self.config).await,
             "clean_cache" => backtest::handle_clean_cache(&self.config, args).await,
@@ -128,6 +135,7 @@ impl ToolHandler {
             "search_reports_by_notes" => reports::handle_search_reports_by_notes(args).await,
             "get_reports_by_set_file" => reports::handle_get_reports_by_set_file(args).await,
             "get_comparable_reports" => reports::handle_get_comparable_reports(args).await,
+            "export_deals_csv" => reports::handle_export_deals_csv(&self.config, args).await,
             
             // Utility handlers
             "check_symbol_data_status" => utility::handle_check_symbol_data_status(&self.config, args).await,
@@ -182,5 +190,26 @@ pub(crate) fn past_complete_month() -> (String, String) {
     (
         first_of_prev.format("%Y.%m.%d").to_string(),
         last_of_prev.format("%Y.%m.%d").to_string(),
+    )
+}
+
+pub(crate) fn current_month() -> (String, String) {
+    let now = chrono::Utc::now();
+    let first_of_month = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+        .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+    let last_of_month = if now.month() == 12 {
+        chrono::NaiveDate::from_ymd_opt(now.year() + 1, 1, 1)
+            .unwrap_or(first_of_month)
+            .pred_opt()
+            .unwrap_or(first_of_month)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(now.year(), now.month() + 1, 1)
+            .unwrap_or(first_of_month)
+            .pred_opt()
+            .unwrap_or(first_of_month)
+    };
+    (
+        first_of_month.format("%Y.%m.%d").to_string(),
+        last_of_month.format("%Y.%m.%d").to_string(),
     )
 }

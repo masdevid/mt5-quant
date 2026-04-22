@@ -23,7 +23,8 @@ pub fn tool_run_backtest() -> Value {
                 "shutdown": { "type": "boolean", "description": "Close MT5 after backtest completes" },
                 "kill_existing": { "type": "boolean", "description": "Kill any running MT5 instance first" },
                 "timeout": { "type": "integer", "description": "Max wait time in seconds (default: 900)" },
-                "gui": { "type": "boolean", "description": "Enable MT5 visualization window" }
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization window" },
+                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10, set to 0 for default 10s)" }
             }
         }
     })
@@ -48,7 +49,8 @@ pub fn tool_run_backtest_quick() -> Value {
                 "deep": { "type": "boolean", "description": "Run deep analysis" },
                 "shutdown": { "type": "boolean", "description": "Close MT5 after backtest" },
                 "timeout": { "type": "integer", "description": "Max wait time in seconds (default: 900)" },
-                "gui": { "type": "boolean", "description": "Enable MT5 visualization" }
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization" },
+                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10)" }
             }
         }
     })
@@ -97,7 +99,8 @@ pub fn tool_launch_backtest() -> Value {
                 "skip_compile": { "type": "boolean" },
                 "skip_clean": { "type": "boolean" },
                 "timeout": { "type": "integer", "description": "Max time in seconds to wait for backtest (default: 900)" },
-                "gui": { "type": "boolean", "description": "Enable visualization during backtest" }
+                "gui": { "type": "boolean", "description": "Enable visualization during backtest" },
+                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10)" }
             }
         }
     })
