@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.31.5] — 2026-04-22
+
+- feat: add check_update and update tools with background auto-check
+- release: v1.31.4
+- fix: update all scripts for correctness and consistency
+- release: v1.31.3
+- docs: clean up public repo — remove IDE files, fix stale refs
+- release: v1.31.2
+- refactor: reduce handler boilerplate in analysis and experts modules
+- fix: registryType mcpbPackageType → mcpb
+
+
 ## [1.31.4] — 2026-04-22
 
 - fix: update all scripts for correctness and consistency
