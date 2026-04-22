@@ -6,12 +6,12 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
+tar -xzf mt5.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-linux-x64.tar.gz
+tar -xzf mt5.tar.gz
 ```
 
 ### Option B: Build from Source
@@ -82,6 +82,7 @@ terminal_dir: "~/Library/Application Support/net.metaquotes.wine.metatrader5/dri
 
 ```bash
 claude mcp add io.github.masdevid/mt5-quant -- ~/.local/bin/mt5-quant
+# Or: claude mcp add mt5-quant -- $(pwd)/mcp-server/bin/mt5-quant
 ```
 
 Verify:
@@ -96,10 +97,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "io.github.masdevid/mt5-quant": {
-      "command": "~/.local/bin/mt5-quant",
-      "disabled": false,
-      "registry": "io.github.masdevid/mt5-quant"
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -113,7 +112,7 @@ Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
 {
   "mcpServers": {
     "mt5-quant": {
-      "command": "~/.local/bin/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -129,7 +128,7 @@ Add to `.vscode/mcp.json` in your workspace:
 {
   "servers": {
     "mt5-quant": {
-      "command": "/path/to/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }

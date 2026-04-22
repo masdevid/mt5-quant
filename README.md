@@ -49,7 +49,7 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 ### Option 1: Pre-built Binary (Recommended)
 
 ```bash
-curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
 tar -xzf mt5.tar.gz
 bash scripts/setup.sh
 ```

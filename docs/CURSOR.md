@@ -6,12 +6,12 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
+tar -xzf mt5.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-linux-x64.tar.gz
+tar -xzf mt5.tar.gz
 ```
 
 ### Option 2: Build from Source
@@ -29,7 +29,7 @@ cargo build --release
 3. Click **Add Custom MCP**
 4. Enter:
    - **Name**: `mt5-quant`
-   - **Command**: `~/.local/bin/mt5-quant`
+   - **Command**: `/path/to/mt5-quant/mcp-server/bin/mt5-quant`
    - **Type**: `stdio`
 
 ### Method 2: Edit mcp.json Directly
@@ -41,7 +41,7 @@ Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
   "mcpServers": {
     "mt5-quant": {
       "type": "stdio",
-      "command": "~/.local/bin/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -56,7 +56,7 @@ cat > ~/.cursor/mcp.json << 'EOF'
   "mcpServers": {
     "mt5-quant": {
       "type": "stdio",
-      "command": "/path/to/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -92,7 +92,7 @@ Arch:    arch -x86_64
 
 1. Check MCP panel in Cursor Settings
 2. Verify the path is absolute (not relative)
-3. Test binary: `/path/to/mt5-quant --help`
+3. Test binary: `/path/to/mt5-quant/mcp-server/bin/mt5-quant --help`
 4. View MCP logs: Output panel → select "MCP" from dropdown
 
 ### Config interpolation
@@ -103,7 +103,7 @@ Cursor supports variable substitution in `mcp.json`:
 {
   "mcpServers": {
     "mt5-quant": {
-      "command": "${userHome}/bin/mt5-quant",
+      "command": "${userHome}/mt5-quant/mcp-server/bin/mt5-quant",
       "args": ["--config", "${workspaceFolder}/config.yaml"]
     }
   }

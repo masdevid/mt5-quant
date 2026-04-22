@@ -6,12 +6,12 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
+tar -xzf mt5.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-linux-x64.tar.gz
+tar -xzf mt5.tar.gz
 ```
 
 ### Option 2: Build from Source
@@ -27,10 +27,8 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "io.github.masdevid/mt5-quant": {
-      "command": "~/.local/bin/mt5-quant",
-      "disabled": false,
-      "registry": "io.github.masdevid/mt5-quant"
+    "mt5-quant": {
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -40,7 +38,7 @@ Or use the automated setup:
 
 ```bash
 # Install binary to standard location
-cp target/release/mt5-quant ~/.local/bin/
+cp mcp-server/bin/mt5-quant ~/.local/bin/
 
 # Then configure
 bash scripts/setup.sh
@@ -98,7 +96,7 @@ The binary auto-detects its config location. No environment variables needed.
 ### MCP server not appearing
 1. Check Windsurf logs: `~/.windsurf/logs/`
 2. Verify executable path is absolute
-3. Test executable manually: `./target/release/mt5-quant --help`
+3. Test executable manually: `./mcp-server/bin/mt5-quant --help`
 
 ### Config not found
 Set `MT5_MCP_HOME` environment variable or ensure config is at default location:

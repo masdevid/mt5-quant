@@ -6,12 +6,12 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
+tar -xzf mt5.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
-tar -xzf mt5-quant.tar.gz
+curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-linux-x64.tar.gz
+tar -xzf mt5.tar.gz
 ```
 
 ### Option 2: Build from Source
@@ -28,7 +28,7 @@ cargo build --release
 2. Run `MCP: Add Server`
 3. Choose **Workspace** or **User** scope
 4. Enter server name: `mt5-quant`
-5. Enter command: `~/.local/bin/mt5-quant`
+5. Enter command: `/path/to/mt5-quant/mcp-server/bin/mt5-quant`
 
 ### Method 2: Edit mcp.json Directly
 
@@ -38,7 +38,7 @@ Add to `.vscode/mcp.json` in your workspace:
 {
   "servers": {
     "mt5-quant": {
-      "command": "~/.local/bin/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -52,7 +52,7 @@ cat > .vscode/mcp.json << 'EOF'
 {
   "servers": {
     "mt5-quant": {
-      "command": "~/.local/bin/mt5-quant"
+      "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
     }
   }
 }
@@ -62,7 +62,7 @@ EOF
 ### Method 3: VS Code CLI
 
 ```bash
-code --add-mcp '{"name":"mt5-quant","command":"~/.local/bin/mt5-quant"}'
+code --add-mcp '{"name":"mt5-quant","command":"/path/to/mt5-quant/mcp-server/bin/mt5-quant"}'
 ```
 
 ## Verify Setup
@@ -115,7 +115,7 @@ Add to `.devcontainer/devcontainer.json`:
       "mcp": {
         "servers": {
           "mt5-quant": {
-            "command": "/path/to/mt5-quant"
+            "command": "/path/to/mt5-quant/mcp-server/bin/mt5-quant"
           }
         }
       }
