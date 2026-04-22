@@ -82,6 +82,23 @@ Check `<terminal_dir>/MQL5/Logs/`:
 - Check `.set` file values appropriate for symbol/broker
 - Confirm `OnInit()` returns `INIT_SUCCEEDED` (MT5 Journal tab)
 
+## Analytics Tools: "No reports in DB" or "Report not found"
+
+Analytics tools load deals from the **SQLite database**, not from CSV files on disk. Resolution order:
+
+1. `report_id` (preferred) — ID from `list_reports`
+2. `report_dir` (legacy) — filesystem path, looks up matching DB entry
+3. No args — uses the latest report automatically
+
+Pre-DB reports (before this version) won't be found by `report_dir`. Re-run the backtest to get a DB-backed report.
+
+**`deals.csv` is no longer written automatically.** Call `export_deals_csv` to generate one on demand:
+```
+export_deals_csv()                              # latest report → report_dir/deals.csv
+export_deals_csv(report_id: "20260422_…")      # specific report
+export_deals_csv(output_path: "/tmp/out.csv")  # custom path
+```
+
 ## Optimization Never Finishes
 
 ```bash

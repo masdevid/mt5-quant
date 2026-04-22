@@ -23,24 +23,26 @@ MT5-Quant/
 │   │   ├── metrics.rs          # Metrics parsing from HTML/XML
 │   │   └── report.rs           # Report, PipelineMetadata, etc.
 │   ├── analytics/              # Report extraction & analysis (migrated from Python)
-│   │   ├── extract.rs          # HTML/XML report parser → metrics.json + deals.csv
+│   │   ├── extract.rs          # HTML/XML report parser → metrics.json (deals → DB)
 │   │   └── analyze.rs          # Deal-level analysis engine → analysis.json
 │   ├── compile/                # MQL5 compilation
 │   │   └── mql_compiler.rs   # MetaEditor wrapper (Wine/CrossOver)
 │   ├── pipeline/               # Backtest orchestration
 │   │   ├── backtest.rs         # 5-stage pipeline (COMPILE→CLEAN→BACKTEST→EXTRACT→ANALYZE)
 │   │   └── stages.rs           # Pipeline stage definitions
+│   ├── storage/                # SQLite persistence
+│   │   └── database.rs         # ReportDb: reports table + deals table
 │   └── tools/                  # MCP tool definitions
-│       ├── definitions/        # Tool schemas (9 domain modules, 89 tools)
+│       ├── definitions/        # Tool schemas (9 domain modules, 90 tools)
 │       │   ├── mod.rs
-│       │   ├── analytics.rs      # 9 analysis tools
-│       │   ├── backtest.rs       # 4 backtest tools
+│       │   ├── analytics.rs      # 19 analysis tools (DB-backed)
+│       │   ├── backtest.rs       # 7 backtest tools
 │       │   ├── baseline.rs       # 1 baseline tool
-│       │   ├── experts.rs        # 4 EA/indicator/script tools
+│       │   ├── experts.rs        # 9 EA/indicator/script tools
 │       │   ├── optimization.rs   # 4 optimization tools
-│       │   ├── reports.rs        # 11 report management tools
+│       │   ├── reports.rs        # 20 report management tools
 │       │   ├── setfiles.rs       # 8 .set file tools
-│       │   └── system.rs         # 3 system tools
+│       │   └── system.rs         # 6 system tools
 │       └── handlers/             # Tool dispatch (9 domain modules)
 │           ├── mod.rs
 │           ├── analysis.rs
@@ -145,17 +147,26 @@ MT5 runs in headless mode, writes the report, and exits.
 
 ---
 
-### Stage 4: EXTRACT
+### Stage 4: EXTRACT + STORE
 
-Single HTML/XML parse pass that produces three artifacts:
+Single HTML/XML parse pass. Deals go directly into the SQLite database; the raw report file is deleted afterwards.
 
 ```rust
 // src/analytics/extract.rs
 let extractor = ReportExtractor::new();
 let result = extractor.extract(&report_path, &output_dir)?;
-// → metrics.json  (aggregate summary)
-// → deals.csv     (all deals, 13 columns)
-// → deals.json    (same data, JSON)
+// → metrics.json  (aggregate summary — written to report_dir)
+// HTML report deleted after extraction
+
+// src/storage/database.rs
+db.insert_deals(&report_id, &result.deals)?;
+// → deals table in SQLite (all deals, keyed by report_id)
+```
+
+On-demand CSV export is available via the `export_deals_csv` tool:
+```
+export_deals_csv(report_id: "20260422_051041_DPS21_XAUUSDc_M5_1")
+// → report_dir/deals.csv  (written only when explicitly requested)
 ```
 
 **Why single-pass?** MT5 HTML reports are large (1-5MB for 14-month tests). Each regex pass over the file takes ~200ms. The old pipeline ran 5 separate grep/regex passes. The Rust implementation uses a single-pass parser: 5× faster and no partial-read inconsistencies.
@@ -175,12 +186,13 @@ if ext == "xml" || path.ends_with(".htm.xml") {
 }
 ```
 
-**Deal columns (13):**
+**Deal columns (stored in DB):**
 ```
-Time | Type | Direction | Volume | Price | S/L | T/P | Profit | Balance | Comment | Order | Magic | Entry
+time | deal | symbol | deal_type | entry | volume | price | order_id
+commission | swap | profit | balance | comment | magic
 ```
 
-The `Comment` column is the key to grid analytics. The EA writes `"Layer #3"`, `"Locking Total"`, `"Zombie Exit"` etc. Pattern matching on comments reconstructs which position was at which layer.
+The `comment` column is the key to grid analytics. The EA writes `"Layer #3"`, `"Locking Total"`, `"Zombie Exit"` etc. Pattern matching on comments reconstructs which position was at which layer.
 
 ---
 

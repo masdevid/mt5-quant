@@ -84,8 +84,8 @@ Run a complete backtest pipeline: compile → clean cache → backtest → extra
   files: {
     metrics_json: string;
     analysis_json: string;
-    deals_csv: string;
-    deals_json: string;
+    // Note: deals are stored in SQLite DB, not on disk.
+    // Call export_deals_csv(report_id) to generate a CSV file on demand.
   };
 
   error?: string;  // Present on failure
@@ -128,9 +128,7 @@ Run a complete backtest pipeline: compile → clean cache → backtest → extra
   },
   "files": {
     "metrics_json": "reports/20250619_143022_MyEA_XAUUSD_M5/metrics.json",
-    "analysis_json": "reports/20250619_143022_MyEA_XAUUSD_M5/analysis.json",
-    "deals_csv": "reports/20250619_143022_MyEA_XAUUSD_M5/deals.csv",
-    "deals_json": "reports/20250619_143022_MyEA_XAUUSD_M5/deals.json"
+    "analysis_json": "reports/20250619_143022_MyEA_XAUUSD_M5/analysis.json"
   }
 }
 ```
@@ -157,7 +155,7 @@ Same as `run_backtest`.
 
 Backtest only: clean cache → backtest → extract. No analysis phase.
 
-**When to call:** When you just need raw trade data (deals.csv) and don't need analytics. Fastest option for batch processing.
+**When to call:** When you just need raw trade data (stored in DB) and don't need analytics. Fastest option for batch processing. Use `export_deals_csv` afterwards if you need a CSV file.
 
 ### Input schema
 
@@ -484,13 +482,15 @@ Delete old report directories to reclaim disk space, keeping the most recent N r
 
 ## `analyze_report`
 
-Read and summarize a completed backtest report without re-running MT5.
+Read and summarize a completed backtest report without re-running MT5. Loads deals from the SQLite database.
 
 ### Input schema
 
 ```typescript
 {
-  report_dir: string;          // Path to report directory
+  report_id?: string;          // Preferred: report ID from list_reports
+  report_dir?: string;         // Legacy: path to report directory (looks up DB entry)
+                               // Omit both to use the latest report automatically
   strategy?: "grid" | "scalper" | "trend" | "hedge" | "generic";
                                // Strategy profile that was used (default: "grid").
                                // Only affects interpretation of analysis.json fields —
@@ -3057,6 +3057,22 @@ Find comparable reports (same EA/symbol/timeframe).
 
 ---
 
+## Granular Analytics — Common Input Pattern
+
+All granular analytics tools below (`analyze_monthly_pnl` through `analyze_efficiency`, plus `list_deals` and `search_deals_*`) share the same report resolution logic:
+
+```typescript
+{
+  report_id?: string;   // Preferred: ID from list_reports
+  report_dir?: string;  // Legacy: filesystem path (looks up DB entry)
+  // Omit both → uses the latest report automatically
+}
+```
+
+Deals are loaded from **SQLite DB**, not from CSV files. The `report_dir` parameter is kept for backward compatibility — if your report is in the DB, passing `report_dir` will resolve to its `report_id` automatically.
+
+---
+
 ## `analyze_monthly_pnl`
 
 Monthly P/L breakdown only.
@@ -3067,8 +3083,10 @@ Monthly P/L breakdown only.
 
 ```typescript
 {
-  report_dir: string;       // Path to report directory
+  report_id?: string;       // Preferred: from list_reports
+  report_dir?: string;      // Legacy: path to report directory
 }
+// Omit all args to use the latest report
 ```
 
 ### Output schema
@@ -3333,7 +3351,7 @@ Peak simultaneous positions.
 
 ## `list_deals`
 
-List individual deals with filters (type, profit range, volume, dates).
+List individual deals with filters (type, profit range, volume, dates). Loads from SQLite DB.
 
 **When to call:** To query individual trades with specific criteria.
 
@@ -3341,7 +3359,9 @@ List individual deals with filters (type, profit range, volume, dates).
 
 ```typescript
 {
-  report_dir: string;
+  report_id?: string;       // Preferred: from list_reports
+  report_dir?: string;      // Legacy: path to report directory
+  // Omit all to use latest report
   deal_type?: "buy" | "sell" | "all";
   min_profit?: number;
   max_profit?: number;
@@ -3377,7 +3397,7 @@ List individual deals with filters (type, profit range, volume, dates).
 
 ## `search_deals_by_comment`
 
-Full-text search in deal comments (e.g., "Layer #3").
+Full-text search in deal comments (e.g., "Layer #3"). Loads from SQLite DB.
 
 **When to call:** To find deals with specific comment patterns.
 
@@ -3385,8 +3405,9 @@ Full-text search in deal comments (e.g., "Layer #3").
 
 ```typescript
 {
-  report_dir: string;
-  query: string;           // Search pattern in comment field
+  report_id?: string;      // Preferred: from list_reports
+  report_dir?: string;     // Legacy: path to report directory
+  query: string;           // Search pattern in comment field (required)
   limit?: number;
 }
 ```
