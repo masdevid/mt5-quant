@@ -7,13 +7,13 @@
     "url": "https://github.com/masdevid/mt5-quant",
     "source": "github"
   },
-  "version": "1.32.1",
+  "version": "1.32.3",
   "packages": [
     {
       "registryType": "mcpb",
-      "version": "1.32.1",
-      "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.32.1/mcp-mt5-quant-macos-arm64.tar.gz",
-      "fileSha256": "a2525e1c0e74587d87f37414652b29b402983625663eb2b3435496e31a2e9714",
+      "version": "1.32.3",
+      "identifier": "https://github.com/masdevid/mt5-quant/releases/download/v1.32.3/mcp-mt5-quant-macos-arm64.tar.gz",
+      "fileSha256": "4c0b396f48c64334455e344644eaf6eaa6783a80fbf148688193e0108eadb949",
       "transport": {
         "type": "stdio"
       },
