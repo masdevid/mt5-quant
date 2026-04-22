@@ -20,13 +20,11 @@ config/baseline.json
 config/backtest_history.json
 
 # Claude Code (personal, not for repo)
-CLAUDE.md
+/CLAUDE.md
+.claude/
 
 # Windsurf (local workflows, not for repo)
 .windsurf/
-
-# GitHub Actions (local workflows, not for repo)
-.github/workflows/
 
 # macOS
 .DS_Store

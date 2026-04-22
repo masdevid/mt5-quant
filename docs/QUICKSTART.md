@@ -6,19 +6,19 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-macos-arm64.tar.gz
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
 tar -xzf mt5-quant.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-linux-x64.tar.gz
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
 tar -xzf mt5-quant.tar.gz
 ```
 
 ### Option B: Build from Source
 
 ```bash
-git clone https://github.com/masdevid/mt5-mcp
-cd mt5-mcp
+git clone https://github.com/masdevid/mt5-quant
+cd mt5-quant
 bash scripts/build-rust.sh
 ```
 
@@ -137,7 +137,7 @@ Add to `.vscode/mcp.json` in your workspace:
 
 Or run `MCP: Add Server` from Command Palette.
 
-### Antigravity
+### Claude Desktop
 
 1. Open Agent panel → Click "..." menu → MCP Servers
 2. Click "Manage MCP Servers"
@@ -153,7 +153,7 @@ Or run `MCP: Add Server` from Command Palette.
   }
 }
 ```
-5. Reload Antigravity to apply changes
+5. Restart Claude Desktop to apply changes
 
 ## 5. Verify Setup
 

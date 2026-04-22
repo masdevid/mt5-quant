@@ -6,11 +6,11 @@
 
 ```bash
 # macOS (Apple Silicon)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-macos-arm64.tar.gz
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-macos-arm64.tar.gz
 tar -xzf mt5-quant.tar.gz
 
 # Linux (x64)
-curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-mcp/releases/latest/download/mt5-quant-linux-x64.tar.gz
+curl -L -o mt5-quant.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mt5-quant-linux-x64.tar.gz
 tar -xzf mt5-quant.tar.gz
 ```
 
