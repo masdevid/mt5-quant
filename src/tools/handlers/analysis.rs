@@ -225,7 +225,9 @@ fn deal_to_json(d: &Deal) -> Value {
 }
 
 fn is_closed_trade(d: &Deal) -> bool {
-    d.entry.to_lowercase().contains("out") && d.profit != 0.0
+    // Accept any "out" entry. Profit may legitimately be 0.0 for journal-extracted
+    // deals (where per-deal P&L is unavailable), so we don't gate on profit != 0.0.
+    d.entry.to_lowercase().contains("out")
 }
 
 pub async fn handle_list_deals(_config: &Config, args: &Value) -> Result<Value> {

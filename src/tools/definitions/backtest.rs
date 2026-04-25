@@ -99,8 +99,10 @@ pub fn tool_launch_backtest() -> Value {
                 "skip_compile": { "type": "boolean" },
                 "skip_clean": { "type": "boolean" },
                 "timeout": { "type": "integer", "description": "Max time in seconds to wait for backtest (default: 900)" },
+                "shutdown": { "type": "boolean", "description": "Shut down MT5 after test (default: true — required for HTML report to be written)" },
                 "gui": { "type": "boolean", "description": "Enable visualization during backtest" },
-                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10)" }
+                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10)" },
+                "inactivity_kill_secs": { "type": "integer", "description": "Kill MT5 if tester log hasn't grown for this many seconds (0 = disabled). Use to abort EAs that stop trading mid-test." }
             }
         }
     })
@@ -114,6 +116,22 @@ pub fn tool_get_backtest_status() -> Value {
             "type": "object",
             "properties": {
                 "report_dir": { "type": "string" }
+            }
+        }
+    })
+}
+
+pub fn tool_get_tester_log() -> Value {
+    json!({
+        "name": "get_tester_log",
+        "description": "Read the active MT5 tester agent journal log. Returns parsed deals, final balance, test progress, and raw log tail. Works during a backtest (if the log is being written) or after completion. Use this to inspect what trades occurred, check for EA activity, or debug issues when the HTML report wasn't produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tail_lines": {
+                    "type": "integer",
+                    "description": "Number of log tail lines to return (default: 100)"
+                }
             }
         }
     })

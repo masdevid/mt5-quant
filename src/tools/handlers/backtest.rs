@@ -74,66 +74,87 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let symbol = if requested_symbol.is_empty() {
-        // Use config default or first available symbol
-        if let Some(default) = config.backtest_symbol.clone() {
-            if preflight.available_symbols.contains(&default) {
-                default
-            } else if let Some(first) = preflight.available_symbols.first() {
-                tracing::warn!("Default symbol {} not found for server {}; using {}", default, active_server, first);
-                first.clone()
-            } else {
+    // No tester data at all → hard fail with helpful context
+    let no_symbols_error = || json!({
+        "content": [{ "type": "text", "text": json!({
+            "error": format!("No symbols available for backtesting on server '{}'.", active_server),
+            "account": { "login": active_login, "server": active_server },
+            "hint": "Open MT5 → View → Strategy Tester → download history for at least one symbol.",
+            "pre_check": "no_symbols"
+        }).to_string() }],
+        "isError": true
+    });
+
+    let symbol: String = if requested_symbol.is_empty() {
+        // No symbol requested — use config default or first available tester symbol.
+        let candidate = config.backtest_symbol.as_deref().unwrap_or("");
+        if candidate.is_empty() {
+            preflight.available_symbols.first()
+                .cloned()
+                .ok_or(()
+                ).unwrap_or_else(|_| return String::new())
+        } else {
+            match Config::resolve_symbol(candidate, &preflight.available_symbols) {
+                Some(resolved) => {
+                    if resolved != candidate {
+                        tracing::warn!(
+                            "Config symbol '{}' not in tester data for '{}'; using '{}' instead",
+                            candidate, active_server, resolved
+                        );
+                    }
+                    resolved.to_string()
+                }
+                None => {
+                    // Config default has no tester data — pick first available
+                    preflight.available_symbols.first()
+                        .cloned()
+                        .unwrap_or_default()
+                }
+            }
+        }
+    } else {
+        // Caller specified a symbol — resolve it against actual tester data.
+        if preflight.available_symbols.is_empty() {
+            return Ok(no_symbols_error());
+        }
+        match Config::resolve_symbol(requested_symbol, &preflight.available_symbols) {
+            Some(resolved) if resolved == requested_symbol => {
+                // Exact match — use as-is
+                resolved.to_string()
+            }
+            Some(resolved) => {
+                // Fuzzy match — proceed with the corrected symbol, surface the substitution
+                tracing::warn!(
+                    "Symbol '{}' not in tester data for '{}'; substituting '{}'",
+                    requested_symbol, active_server, resolved
+                );
+                resolved.to_string()
+            }
+            None => {
+                // No match at all — fail with full context so the caller can act
                 return Ok(json!({
                     "content": [{ "type": "text", "text": json!({
-                        "error": format!("No symbols available for backtesting on server '{}'.", active_server),
-                        "account": {
-                            "login": active_login,
-                            "server": active_server
-                        },
-                        "hint": "Download historical data in MT5 Strategy Tester for this server.",
-                        "pre_check": "no_symbols",
-                        "suggestion": "Use get_active_account to see available symbols."
+                        "error": format!(
+                            "Symbol '{}' has no tester data on server '{}' and no close match was found.",
+                            requested_symbol, active_server
+                        ),
+                        "account": { "login": active_login, "server": active_server },
+                        "requested_symbol": requested_symbol,
+                        "available_symbols": preflight.available_symbols,
+                        "hint": "The tester data for this symbol hasn't been downloaded yet. \
+                                 Open MT5 → Strategy Tester → select the symbol and click Download.",
+                        "pre_check": "symbol_not_available"
                     }).to_string() }],
                     "isError": true
                 }));
             }
-        } else if let Some(first) = preflight.available_symbols.first() {
-            first.clone()
-        } else {
-            return Ok(json!({
-                "content": [{ "type": "text", "text": json!({
-                    "error": format!("No symbols available for backtesting on server '{}'.", active_server),
-                    "account": {
-                        "login": active_login,
-                        "server": active_server
-                    },
-                    "hint": "Download historical data in MT5 Strategy Tester for this server.",
-                    "pre_check": "no_symbols",
-                    "suggestion": "Use get_active_account to see available symbols."
-                }).to_string() }],
-                "isError": true
-            }));
         }
-    } else {
-        if !preflight.available_symbols.is_empty() && !preflight.available_symbols.contains(&requested_symbol.to_string()) {
-            return Ok(json!({
-                "content": [{ "type": "text", "text": json!({
-                    "error": format!("Symbol '{}' is not available for server '{}'.", requested_symbol, active_server),
-                    "account": {
-                        "login": active_login,
-                        "server": active_server
-                    },
-                    "requested_symbol": requested_symbol,
-                    "available_symbols": preflight.available_symbols,
-                    "hint": "The symbol may not have history data for this account's server. Use list_symbols to see available symbols.",
-                    "pre_check": "symbol_not_available",
-                    "suggestion": "Either switch to a different MT5 account with this symbol's data, or download history for this symbol on the current server."
-                }).to_string() }],
-                "isError": true
-            }));
-        }
-        requested_symbol.to_string()
     };
+
+    // Guard against the empty-string edge case (no symbols at all)
+    if symbol.is_empty() {
+        return Ok(no_symbols_error());
+    }
     
     // EA existence check with context
     if !preflight.ea_exists {
@@ -172,11 +193,12 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
         skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
         skip_analyze: args.get("skip_analyze").and_then(|v| v.as_bool()).unwrap_or(false),
         deep_analyze: args.get("deep").and_then(|v| v.as_bool()).unwrap_or(false),
-        shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(false),
+        shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true),
         kill_existing: args.get("kill_existing").and_then(|v| v.as_bool()).unwrap_or(false),
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
         startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
+        inactivity_kill_secs: args.get("inactivity_kill_secs").and_then(|v| v.as_u64()),
     };
 
     let pipeline = BacktestPipeline::new(config.clone());
@@ -193,24 +215,26 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
     }))
 }
 
-pub async fn handle_run_backtest_quick(config: &Config, args: &Value) -> Result<Value> {
-    // Quick backtest: skip compile, do clean → backtest → extract → analyze
+pub async fn handle_run_backtest_quick(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
+    // Quick backtest: skip compile, clean → launch → background monitor → return job.
+    // Uses the fire-and-forget launch path so the MCP response is returned immediately
+    // and the result is available via get_backtest_status / get_latest_report once done.
+    // (The synchronous blocking path exceeds MCP request timeouts for any backtest >2 min.)
     let mut args = args.clone();
     if let Some(obj) = args.as_object_mut() {
         obj.insert("skip_compile".to_string(), json!(true));
-        // keep skip_analyze as false (default) to run analysis
     }
-    handle_run_backtest(config, &args).await
+    handle_launch_backtest(handler, &args).await
 }
 
-pub async fn handle_run_backtest_only(config: &Config, args: &Value) -> Result<Value> {
-    // Backtest only: skip compile, skip analyze - just backtest and extract
+pub async fn handle_run_backtest_only(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
+    // Backtest only: skip compile and analyze — launch and return job immediately.
     let mut args = args.clone();
     if let Some(obj) = args.as_object_mut() {
         obj.insert("skip_compile".to_string(), json!(true));
         obj.insert("skip_analyze".to_string(), json!(true));
     }
-    handle_run_backtest(config, &args).await
+    handle_launch_backtest(handler, &args).await
 }
 
 pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
@@ -232,17 +256,50 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
         }));
     }
     
-    // Get symbol
+    // Get symbol — resolve against actual tester data (same logic as handle_run_backtest)
+    let active_server = preflight.server.as_deref().unwrap_or("unknown");
     let requested_symbol = args.get("symbol")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let symbol = if requested_symbol.is_empty() {
-        handler.config.backtest_symbol.clone()
-            .or_else(|| preflight.available_symbols.first().cloned())
-            .unwrap_or_else(|| "EURUSD".to_string())
+    let symbol: String = if requested_symbol.is_empty() {
+        let candidate = handler.config.backtest_symbol.as_deref().unwrap_or("");
+        if candidate.is_empty() {
+            preflight.available_symbols.first().cloned().unwrap_or_default()
+        } else {
+            Config::resolve_symbol(candidate, &preflight.available_symbols)
+                .map(|s| s.to_string())
+                .or_else(|| preflight.available_symbols.first().cloned())
+                .unwrap_or_else(|| candidate.to_string())
+        }
     } else {
-        requested_symbol.to_string()
+        match Config::resolve_symbol(requested_symbol, &preflight.available_symbols) {
+            Some(resolved) => {
+                if resolved != requested_symbol {
+                    tracing::warn!(
+                        "launch_backtest: symbol '{}' not in tester data for '{}'; using '{}'",
+                        requested_symbol, active_server, resolved
+                    );
+                }
+                resolved.to_string()
+            }
+            None if preflight.available_symbols.is_empty() => requested_symbol.to_string(),
+            None => {
+                return Ok(json!({
+                    "content": [{ "type": "text", "text": json!({
+                        "error": format!(
+                            "Symbol '{}' has no tester data on server '{}' and no close match was found.",
+                            requested_symbol, active_server
+                        ),
+                        "requested_symbol": requested_symbol,
+                        "available_symbols": preflight.available_symbols,
+                        "hint": "Open MT5 → Strategy Tester → select the symbol and click Download.",
+                        "pre_check": "symbol_not_available"
+                    }).to_string() }],
+                    "isError": true
+                }));
+            }
+        }
     };
     
     // EA existence check
@@ -281,11 +338,16 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
         skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
         skip_analyze: true, // Not needed for launch mode
         deep_analyze: false,
-        shutdown: false, // Don't shutdown so we can poll
+        // ShutdownTerminal=1 (default): MT5 writes the HTML report and exits cleanly.
+        // The background monitor's post-exit scan finds the report within 10s.
+        // The inactivity watchdog is intentionally skipped when shutdown=true so it
+        // doesn't race with MT5's report write right before natural exit.
+        shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true),
         kill_existing: false,
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
         startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
+        inactivity_kill_secs: args.get("inactivity_kill_secs").and_then(|v| v.as_u64()),
     };
 
     let pipeline = if let Some(ref callback) = handler.notification_callback {
@@ -348,15 +410,27 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     // Check if MT5 is running
     let mt5_running = is_mt5_running();
     
-    // Check if report file exists
+    // Check if report file exists (still on disk — it's deleted after extraction)
     let report_found = job.as_ref()
         .map(|j| Path::new(&j.expected_report_path).exists())
         .unwrap_or(false);
-    
+
     // Check for completed artifacts
     let metrics_exists = report_path.join("metrics.json").exists();
-    let is_complete = stage == "DONE" || (report_found && metrics_exists);
-    
+
+    // Read the authoritative status written by the background monitor into job.json.
+    // This avoids false "failed" when the HTML was extracted+deleted (report_found=false)
+    // or when journal extraction ran instead of HTML extraction.
+    let job_status = job.as_ref()
+        .and_then(|j| j.status.as_deref())
+        .unwrap_or("");
+    let monitor_says_complete = matches!(job_status, "completed" | "completed_no_html");
+    let monitor_says_failed   = matches!(job_status, "failed" | "timeout" | "timeout_inactive");
+
+    let is_complete = monitor_says_complete
+        || stage == "DONE"
+        || (report_found && metrics_exists);
+
     // Calculate elapsed time if job exists
     let elapsed_seconds = job.as_ref()
         .and_then(|j| {
@@ -365,26 +439,32 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
                 .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds())
         })
         .unwrap_or(0);
-    
-    // Determine status message
+
+    // Determine status message — trust monitor's job.json first
     let status_msg = if is_complete {
         "completed"
+    } else if monitor_says_failed {
+        if job_status == "timeout" || job_status == "timeout_inactive" { "timeout" } else { "failed" }
     } else if stage == "BACKTEST" && mt5_running {
         "running"
-    } else if stage == "BACKTEST" && !mt5_running && !report_found {
+    } else if stage == "BACKTEST" && !mt5_running {
         "failed"
     } else if progress_lines > 0 {
         "in_progress"
     } else {
         "not_started"
     };
-    
+
     let message = if is_complete {
-        "Backtest completed successfully"
+        if job_status == "completed_no_html" {
+            "Backtest completed (extracted from tester journal — no HTML report)"
+        } else {
+            "Backtest completed successfully"
+        }
     } else if stage == "BACKTEST" && mt5_running {
         "MT5 is running the backtest"
     } else if stage == "BACKTEST" && !mt5_running {
-        "MT5 process exited but report not found - backtest may have failed"
+        "MT5 process exited — report not yet found"
     } else {
         &format!("Backtest is at stage: {}", stage)
     };
@@ -431,6 +511,87 @@ fn is_mt5_running() -> bool {
             .map(|o| o.status.success())
             .unwrap_or(false)
     })
+}
+
+/// Read the active tester agent log for live/post-test deal inspection.
+/// Returns the last N lines and a parsed deal summary.
+pub async fn handle_get_tester_log(config: &Config, args: &Value) -> Result<Value> {
+    use crate::pipeline::backtest::BacktestPipeline;
+
+    let tail_lines = args.get("tail_lines").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+
+    let log_path = match BacktestPipeline::find_active_tester_agent_log(config) {
+        Some(p) => p,
+        None => {
+            return Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "error": "No tester agent log found for today.",
+                    "hint": "Run a backtest first. The log appears after the tester starts."
+                }).to_string() }],
+                "isError": true
+            }));
+        }
+    };
+
+    let lines = match BacktestPipeline::read_tester_agent_log(&log_path) {
+        Some(l) => l,
+        None => {
+            return Ok(json!({
+                "content": [{ "type": "text", "text": json!({
+                    "error": format!("Could not read log at {}", log_path.display())
+                }).to_string() }],
+                "isError": true
+            }));
+        }
+    };
+
+    let (deals, final_balance_pips, progress) = BacktestPipeline::parse_journal_deals(&lines);
+
+    // Collect tail lines
+    let tail: Vec<&str> = lines.iter()
+        .rev()
+        .take(tail_lines)
+        .rev()
+        .map(|s| s.as_str())
+        .collect();
+
+    // Detect last sim timestamp for progress estimation
+    let last_sim_time = lines.iter().rev()
+        .find_map(|l| {
+            let parts: Vec<&str> = l.split_whitespace().collect();
+            // Format: XX  0  HH:MM:SS.mmm  Core NN  YYYY.MM.DD HH:MM:SS ...
+            if parts.len() >= 6 {
+                let date = parts[4];
+                let time = parts[5];
+                if date.contains('.') && time.contains(':') {
+                    return Some(format!("{} {}", date, time));
+                }
+            }
+            None
+        })
+        .unwrap_or_default();
+
+    Ok(json!({
+        "content": [{ "type": "text", "text": json!({
+            "log_path": log_path.to_string_lossy(),
+            "total_lines": lines.len(),
+            "deals_found": deals.len(),
+            "final_balance_pips": final_balance_pips,
+            "progress": progress,
+            "last_sim_time": last_sim_time,
+            "is_complete": !progress.is_empty(),
+            "tail_lines": tail,
+            "deals_summary": deals.iter().map(|d| json!({
+                "deal": d.deal,
+                "time": d.time,
+                "type": d.deal_type,
+                "volume": d.volume,
+                "price": d.price,
+                "symbol": d.symbol,
+            })).collect::<Vec<_>>()
+        }).to_string() }],
+        "isError": false
+    }))
 }
 
 pub async fn handle_cache_status(config: &Config) -> Result<Value> {

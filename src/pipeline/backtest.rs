@@ -44,6 +44,9 @@ pub struct BacktestParams {
     pub timeout: u64,
     pub gui: bool,
     pub startup_delay_secs: u64,
+    /// Kill MT5 if tester agent log hasn't grown for this many seconds.
+    /// 0 = disabled. Useful to abort EAs that stop trading mid-backtest.
+    pub inactivity_kill_secs: Option<u64>,
 }
 
 pub struct PipelineResult {
@@ -193,7 +196,7 @@ impl BacktestPipeline {
         }
 
         self.log_progress(&progress_log, "BACKTEST").await;
-        
+
         // Get MT5 paths
         let mt5_dir = self.config.mt5_dir()
             .ok_or_else(|| anyhow!("MT5 directory not configured"))?;
@@ -208,14 +211,15 @@ impl BacktestPipeline {
         let reports_dir = mt5_dir.join("reports");
         fs::create_dir_all(&reports_dir)?;
 
-        // Write params via /config: (triggers tester) and terminal.ini (redundancy).
+        // Kill first — MT5 writes terminal.ini on exit, which would clobber
+        // the backtest params we're about to write.
+        self.kill_mt5().await?;
+
+        // Write params *after* MT5 is dead so nothing can overwrite them.
         let ini_content = self.build_backtest_ini(&params, &report_id)?;
         let config_host = wine_prefix.join("drive_c").join("backtest_config.ini");
         fs::write(&config_host, ini_content.as_bytes())?;
         self.update_terminal_ini(&params, &report_id)?;
-
-        // Kill any running MT5
-        self.kill_mt5().await?;
 
         // Launch MT5 (fire and forget)
         let mut cmd = self.build_wine_launch(wine_exe, &wine_prefix)?;
@@ -278,6 +282,7 @@ impl BacktestPipeline {
             timeout: params.timeout,
             gui: params.gui,
             startup_delay_secs: params.startup_delay_secs,
+            inactivity_kill_secs: params.inactivity_kill_secs,
         };
         tokio::spawn(async move {
             Self::monitor_backtest_completion(
@@ -376,12 +381,29 @@ impl BacktestPipeline {
         let grace_period = Duration::from_secs(30);
         let poll_start = std::time::SystemTime::now();
 
+        // Inactivity watchdog: kill MT5 if tester agent log hasn't grown for this long.
+        // Catches EAs that stall (no ticks processed) or flat periods with zero trades.
+        let inactivity_threshold = Duration::from_secs(
+            params.inactivity_kill_secs.unwrap_or(0)
+        );
+        let mut last_log_size: u64 = 0;
+        let mut last_log_activity = tokio::time::Instant::now();
+        let inactivity_enabled = inactivity_threshold.as_secs() > 0;
+
         loop {
             let _elapsed = start.elapsed().as_secs();
 
-            // Check for report file
-            for ext in &[".htm", ".htm.xml", ".html"] {
-                let candidate = expected_report.with_extension(ext.trim_start_matches('.'));
+            // Check for report file (exact name first)
+            for ext in &["htm", "htm.xml", "html"] {
+                let candidate = if *ext == "htm" {
+                    expected_report.clone()
+                } else {
+                    // Build alternate extension path without touching expected_report extension
+                    let stem = expected_report.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    expected_report.with_file_name(format!("{}.{}", stem, ext))
+                };
                 if candidate.exists() {
                     tracing::info!("Backtest {} completed: report found at {}", report_id, candidate.display());
                     let extracted = Self::extract_and_store(&candidate, &report_dir, &report_id, &config, &params).await;
@@ -389,6 +411,15 @@ impl BacktestPipeline {
                         let _ = fs::remove_file(&candidate);
                     } else {
                         tracing::warn!("Backtest {}: extraction failed, keeping report file at {}", report_id, candidate.display());
+                    }
+                    // When ShutdownTerminal=0 (shutdown=false), MT5 stays running after the
+                    // test so the report can be written reliably. Kill it ourselves now that
+                    // extraction is done so we don't leave zombie Wine processes.
+                    if !params.shutdown && Self::is_mt5_running() {
+                        tracing::info!("Backtest {}: killing MT5 after report extraction (shutdown=false)", report_id);
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-TERM", "-f", "terminal64\\.exe"])
+                            .output();
                     }
                     Self::update_job_status(&report_dir, "completed", Some(candidate.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
@@ -402,12 +433,113 @@ impl BacktestPipeline {
                 }
             }
 
+            // Inactivity watchdog: check if tester agent log is growing.
+            // The agent log is written incrementally as the tester processes ticks.
+            // If it stops growing for `inactivity_threshold` seconds → the test is done
+            // (or EA is stuck). Either way, we wait 30 s for MT5 to write the HTML
+            // report, then kill it unconditionally.
+            //
+            // NOTE: ShutdownTerminal=1 is supposed to make MT5 exit after the test,
+            // but on Wine/macOS this is unreliable — terminal64.exe often stays alive
+            // indefinitely. So we always kill after the HTML-wait window rather than
+            // depending on natural exit. The 30 s window is long enough for MT5 to flush
+            // the report file; if it isn't there by then, it won't appear.
+            if inactivity_enabled && Self::is_mt5_running() {
+                if let Some(log_path) = Self::find_active_tester_agent_log(&config) {
+                    let current_size = fs::metadata(&log_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    if current_size > last_log_size {
+                        last_log_size = current_size;
+                        last_log_activity = tokio::time::Instant::now();
+                    } else if last_log_activity.elapsed() >= inactivity_threshold && last_log_size > 0 {
+                        tracing::info!(
+                            "Backtest {}: tester log inactive for {}s — waiting 30s for HTML report, then killing MT5",
+                            report_id, inactivity_threshold.as_secs()
+                        );
+                        // Poll for the HTML during the grace window (30 s, 1 s intervals).
+                        let reports_parent = expected_report.parent();
+                        let mut html_found: Option<std::path::PathBuf> = None;
+                        for _wait in 0u32..30 {
+                            // Check exact expected path first.
+                            for ext in &["htm", "htm.xml", "html"] {
+                                let candidate = if *ext == "htm" {
+                                    expected_report.clone()
+                                } else {
+                                    let stem = expected_report.file_stem()
+                                        .map(|s| s.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    expected_report.with_file_name(format!("{}.{}", stem, ext))
+                                };
+                                if candidate.exists() {
+                                    html_found = Some(candidate);
+                                    break;
+                                }
+                            }
+                            if html_found.is_some() { break; }
+                            // Also scan for any newly created report.
+                            if let Some(parent) = reports_parent {
+                                if let Some(path) = Self::find_newest_report(parent, poll_start) {
+                                    html_found = Some(path);
+                                    break;
+                                }
+                            }
+                            sleep(Duration::from_secs(1)).await;
+                        }
+
+                        // Kill MT5 now — it either wrote the report or it won't.
+                        tracing::info!("Backtest {}: killing MT5 after inactivity+HTML-wait window", report_id);
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-TERM", "-f", "terminal64\\.exe"])
+                            .output();
+                        sleep(Duration::from_secs(2)).await;
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-KILL", "-f", "terminal64\\.exe"])
+                            .output();
+
+                        if let Some(path) = html_found {
+                            tracing::info!("Backtest {}: HTML report found during wait: {}", report_id, path.display());
+                            let extracted = Self::extract_and_store(&path, &report_dir, &report_id, &config, &params).await;
+                            if extracted { let _ = fs::remove_file(&path); }
+                            Self::update_job_status(&report_dir, "completed", Some(path.to_string_lossy().to_string())).await;
+                            if let Some(ref callback) = notification_callback {
+                                callback("backtest_completed", json!({
+                                    "report_id": report_id,
+                                    "status": "completed"
+                                }));
+                            }
+                            return;
+                        }
+
+                        // No HTML — fall back to journal extraction.
+                        sleep(Duration::from_secs(1)).await;
+                        if let Some(log) = Self::find_active_tester_agent_log(&config) {
+                            if Self::extract_from_journal(&log, &report_dir, &report_id, &config, &params).await {
+                                Self::update_job_status(&report_dir, "completed_no_html", None).await;
+                                if let Some(ref callback) = notification_callback {
+                                    callback("backtest_completed", json!({
+                                        "report_id": report_id,
+                                        "status": "completed_no_html",
+                                        "reason": "extracted from journal after inactivity kill (no HTML produced)"
+                                    }));
+                                }
+                                return;
+                            }
+                        }
+                        Self::update_job_status(&report_dir, "timeout_inactive", None).await;
+                        return;
+                    }
+                }
+            }
+
             // Check process liveness after grace period
             let in_grace = start.elapsed() <= grace_period;
             let mt5_alive = Self::is_mt5_running();
 
             if !in_grace && !mt5_alive {
-                // MT5 exited without report - check for any newer report
+                // MT5 exited. Poll for the .htm report for up to 10 s (check every 1 s).
+                // Wine on macOS can take several seconds to flush the file after the
+                // process exits — a single fixed wait often misses the window.
                 let reports_parent = match expected_report.parent() {
                     Some(p) => p,
                     None => {
@@ -416,13 +548,26 @@ impl BacktestPipeline {
                         return;
                     }
                 };
-                if let Some(path) = Self::find_newest_report(reports_parent, poll_start) {
-                    tracing::info!("Backtest {} completed: found fallback report {}", report_id, path.display());
+                let mut found_report: Option<std::path::PathBuf> = None;
+                for attempt in 1u32..=10 {
+                    sleep(Duration::from_secs(1)).await;
+                    if let Some(path) = Self::find_newest_report(reports_parent, poll_start) {
+                        tracing::info!(
+                            "Backtest {}: found report after {}s — {}",
+                            report_id, attempt, path.display()
+                        );
+                        found_report = Some(path);
+                        break;
+                    }
+                    tracing::debug!("Backtest {}: no report yet ({}s elapsed after MT5 exit)", report_id, attempt);
+                }
+                if let Some(path) = found_report {
+                    tracing::info!("Backtest {} completed: found report {}", report_id, path.display());
                     let extracted = Self::extract_and_store(&path, &report_dir, &report_id, &config, &params).await;
                     if extracted {
                         let _ = fs::remove_file(&path);
                     } else {
-                        tracing::warn!("Backtest {}: extraction failed, keeping fallback report at {}", report_id, path.display());
+                        tracing::warn!("Backtest {}: extraction failed, keeping report at {}", report_id, path.display());
                     }
                     Self::update_job_status(&report_dir, "completed", Some(path.to_string_lossy().to_string())).await;
                     if let Some(ref callback) = notification_callback {
@@ -432,22 +577,46 @@ impl BacktestPipeline {
                             "status": "completed"
                         }));
                     }
-                } else {
-                    tracing::warn!("Backtest {} failed: MT5 exited without producing a report", report_id);
-                    Self::update_job_status(&report_dir, "failed", None).await;
-                    if let Some(ref callback) = notification_callback {
-                        callback("backtest_failed", json!({
-                            "report_id": report_id,
-                            "status": "failed",
-                            "reason": "MT5 exited without producing a report"
-                        }));
+                    return;
+                }
+
+                // No HTML report found — fallback to journal extraction.
+                tracing::warn!("Backtest {}: no HTML report found, trying journal extraction", report_id);
+                if let Some(log) = Self::find_active_tester_agent_log(&config) {
+                    if Self::extract_from_journal(&log, &report_dir, &report_id, &config, &params).await {
+                        Self::update_job_status(&report_dir, "completed_no_html", None).await;
+                        if let Some(ref callback) = notification_callback {
+                            callback("backtest_completed", json!({
+                                "report_id": report_id,
+                                "status": "completed_no_html",
+                                "reason": "extracted from tester journal (HTML report not produced)"
+                            }));
+                        }
+                        return;
                     }
+                }
+
+                tracing::warn!("Backtest {} failed: MT5 exited without producing a report", report_id);
+                Self::update_job_status(&report_dir, "failed", None).await;
+                if let Some(ref callback) = notification_callback {
+                    callback("backtest_failed", json!({
+                        "report_id": report_id,
+                        "status": "failed",
+                        "reason": "MT5 exited without producing a report or recoverable journal"
+                    }));
                 }
                 return;
             }
 
             if tokio::time::Instant::now() > deadline {
                 tracing::warn!("Backtest {} timed out after {} seconds", report_id, timeout_secs);
+                // Last-chance journal extraction on timeout
+                if let Some(log) = Self::find_active_tester_agent_log(&config) {
+                    if Self::extract_from_journal(&log, &report_dir, &report_id, &config, &params).await {
+                        Self::update_job_status(&report_dir, "completed_no_html", None).await;
+                        return;
+                    }
+                }
                 Self::update_job_status(&report_dir, "timeout", None).await;
                 if let Some(ref callback) = notification_callback {
                     callback("backtest_timeout", json!({
@@ -461,6 +630,251 @@ impl BacktestPipeline {
 
             sleep(Duration::from_secs(2)).await;
         }
+    }
+
+    /// Find the best tester agent log file for today.
+    ///
+    /// Selection priority:
+    /// 1. Local agents (127.0.0.1) preferred over external/cloud agents (0.0.0.0)
+    ///    — 0.0.0.0 logs only contain startup info, never actual deal lines.
+    /// 2. Among equal-priority agents, pick the **largest** file (most content).
+    pub fn find_active_tester_agent_log(config: &Config) -> Option<PathBuf> {
+        let mt5_dir = config.mt5_dir()?;
+        let tester_dir = mt5_dir.join("Tester");
+        let today = chrono::Utc::now().format("%Y%m%d").to_string();
+
+        // (priority, size, path)  — higher priority = more preferred
+        // priority 1 = local (127.0.0.1), priority 0 = other (0.0.0.0 / any)
+        let mut best: Option<(u8, u64, PathBuf)> = None;
+
+        if let Ok(agents) = fs::read_dir(&tester_dir) {
+            for agent in agents.filter_map(|e| e.ok()) {
+                let agent_name = agent.file_name();
+                let agent_str = agent_name.to_string_lossy();
+
+                // Only consider Agent-* directories
+                if !agent_str.starts_with("Agent-") {
+                    continue;
+                }
+
+                let logs_dir = agent.path().join("logs");
+                let candidate = logs_dir.join(format!("{}.log", today));
+                if !candidate.exists() {
+                    continue;
+                }
+
+                let meta = match fs::metadata(&candidate) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let size = meta.len();
+
+                // Prefer local agents (127.0.0.1) — they log actual deal execution
+                let priority: u8 = if agent_str.contains("127.0.0.1") { 1 } else { 0 };
+
+                let is_better = match &best {
+                    None => true,
+                    Some((bp, bs, _)) => priority > *bp || (priority == *bp && size > *bs),
+                };
+
+                if is_better {
+                    best = Some((priority, size, candidate));
+                }
+            }
+        }
+        best.map(|(_, _, p)| p)
+    }
+
+    /// Read the most recent tester agent log and return its lines (UTF-16 or UTF-8).
+    pub fn read_tester_agent_log(log_path: &Path) -> Option<Vec<String>> {
+        let bytes = fs::read(log_path).ok()?;
+        let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+            // UTF-16 LE with BOM
+            let words: Vec<u16> = bytes[2..].chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&words).to_string()
+        } else {
+            String::from_utf8_lossy(&bytes).to_string()
+        };
+        Some(text.lines().map(|l| l.to_string()).collect())
+    }
+
+    /// Parse deal entries from a tester agent log.
+    /// Returns (deals_parsed, final_balance_pips, sim_progress_line).
+    ///
+    /// Entry direction (in/out) is inferred via a per-symbol position tracker:
+    ///   - No open position → "in"
+    ///   - Same direction as existing position → "in" (grid/martingale add)
+    ///   - Opposite direction → "out" (closing)
+    /// Profit/balance are unavailable in the journal; they remain 0.0.
+    pub fn parse_journal_deals(lines: &[String]) -> (Vec<crate::models::deals::Deal>, f64, String) {
+        use regex::Regex;
+        use std::collections::HashMap;
+
+        // Format: "...  YYYY.MM.DD HH:MM:SS   deal #N buy/sell VOLUME SYM at PRICE done ..."
+        let deal_re = Regex::new(
+            r"(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+deal #(\d+) (buy|sell) ([\d.]+) (\S+) at ([\d.]+) done"
+        ).unwrap();
+        let balance_re = Regex::new(r"final balance ([\d.]+) pips").unwrap();
+        let progress_re = Regex::new(r"Test passed in (.+)").unwrap();
+
+        let mut deals = Vec::new();
+        let mut final_balance = 0.0f64;
+        let mut progress_str = String::new();
+
+        // signed lots per symbol: positive = net long, negative = net short
+        let mut position: HashMap<String, f64> = HashMap::new();
+        // MT5 tester logs each deal TWICE (dual-agent logging) — deduplicate by deal number
+        let mut seen_deals: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for line in lines {
+            if let Some(cap) = deal_re.captures(line) {
+                let sim_time  = cap[1].to_string();
+                let deal_num  = cap[2].to_string();
+                let direction = cap[3].to_string(); // "buy" | "sell"
+                let volume: f64 = cap[4].parse().unwrap_or(0.0);
+                let symbol    = cap[5].to_string();
+                let price: f64 = cap[6].parse().unwrap_or(0.0);
+
+                // Skip duplicate deal entries (MT5 writes each deal twice)
+                if !seen_deals.insert(deal_num.clone()) {
+                    continue;
+                }
+
+                let signed = if direction == "buy" { volume } else { -volume };
+                let current = position.get(&symbol).copied().unwrap_or(0.0);
+
+                // Determine entry type by comparing new direction against open position
+                let entry_type = if current.abs() < 1e-9 {
+                    // flat → opening a new position
+                    "in"
+                } else if (current > 0.0 && direction == "buy")
+                       || (current < 0.0 && direction == "sell")
+                {
+                    // same direction as existing → adding (grid/martingale)
+                    "in"
+                } else {
+                    // opposite direction → closing / partial close
+                    "out"
+                };
+
+                // Update tracked position
+                let new_pos = current + signed;
+                if new_pos.abs() < 1e-9 {
+                    position.remove(&symbol);
+                } else {
+                    position.insert(symbol.clone(), new_pos);
+                }
+
+                deals.push(crate::models::deals::Deal {
+                    time:       sim_time,
+                    deal:       deal_num,
+                    symbol,
+                    deal_type:  direction,
+                    entry:      entry_type.to_string(),
+                    volume,
+                    price,
+                    order:      String::new(),
+                    commission: 0.0,
+                    swap:       0.0,
+                    profit:     0.0,  // not available in journal
+                    balance:    0.0,  // not available in journal
+                    comment:    String::new(),
+                    magic:      None,
+                });
+            }
+            if let Some(cap) = balance_re.captures(line) {
+                final_balance = cap[1].parse().unwrap_or(0.0);
+            }
+            if let Some(cap) = progress_re.captures(line) {
+                progress_str = cap[1].to_string();
+            }
+        }
+
+        (deals, final_balance, progress_str)
+    }
+
+    /// Fallback: extract deals from the tester agent journal log when no HTML report exists.
+    /// Stores partial deal data (no per-deal P&L) and records the final balance only.
+    async fn extract_from_journal(
+        log_path: &Path,
+        report_dir: &Path,
+        report_id: &str,
+        config: &Config,
+        params: &BacktestParams,
+    ) -> bool {
+        let lines = match Self::read_tester_agent_log(log_path) {
+            Some(l) => l,
+            None => {
+                tracing::warn!("Journal extraction: could not read log {}", log_path.display());
+                return false;
+            }
+        };
+
+        let (deals, final_balance_pips, progress) = Self::parse_journal_deals(&lines);
+        if deals.is_empty() {
+            tracing::warn!("Journal extraction: no deals found in {}", log_path.display());
+            return false;
+        }
+
+        tracing::info!(
+            "Journal extraction: {} deals, final balance {} pips, {}",
+            deals.len(), final_balance_pips, progress
+        );
+
+        // Save journal summary to report_dir
+        let summary_path = report_dir.join("journal_extraction.json");
+        let summary = json!({
+            "source": "tester_agent_log",
+            "log_path": log_path.to_string_lossy(),
+            "total_deals": deals.len(),
+            "final_balance_pips": final_balance_pips,
+            "progress": progress,
+            "note": "No HTML report was produced. Deals extracted from tester agent log. profit/balance fields are 0 (not available in log format)."
+        });
+        let _ = fs::write(&summary_path, serde_json::to_string_pretty(&summary).unwrap_or_default());
+
+        // Register in DB with partial metrics
+        let db = crate::storage::ReportDb::new(&Config::db_path());
+        if db.init().is_err() {
+            return false;
+        }
+        let entry = crate::storage::ReportEntry {
+            id: report_id.to_string(),
+            expert: params.expert.clone(),
+            symbol: params.symbol.clone(),
+            timeframe: params.timeframe.clone(),
+            model: params.model as i64,
+            from_date: params.from_date.clone(),
+            to_date: params.to_date.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            set_file_original: params.set_file.clone(),
+            set_snapshot_path: None,
+            report_dir: report_dir.to_string_lossy().to_string(),
+            charts_dir: None,
+            net_profit: Some(final_balance_pips - params.deposit as f64),
+            profit_factor: None,
+            max_dd_pct: None,
+            sharpe_ratio: None,
+            total_trades: Some(deals.len() as i64 / 2), // open+close pairs
+            win_rate_pct: None,
+            recovery_factor: None,
+            deposit: Some(params.deposit as f64),
+            currency: config.backtest_currency.clone(),
+            leverage: Some(params.leverage as i64),
+            duration_seconds: None,
+            tags: vec!["journal-only".to_string()],
+            notes: Some(format!("Extracted from journal: {} deals, final balance {} pips. No HTML report.", deals.len(), final_balance_pips)),
+            verdict: None,
+        };
+        if db.insert(&entry).is_err() {
+            return false;
+        }
+        if let Err(e) = db.insert_deals(report_id, &deals) {
+            tracing::warn!("Journal extraction: failed to store deals: {}", e);
+        }
+        true
     }
 
     /// Update job status in job.json file.
@@ -706,14 +1120,15 @@ impl BacktestPipeline {
         let reports_dir = mt5_dir.join("reports");
         fs::create_dir_all(&reports_dir)?;
 
-        // Write params via /config: (triggers tester auto-start) and terminal.ini (redundancy).
+        // Kill first — MT5 writes terminal.ini on exit, which would clobber
+        // the backtest params we're about to write.
+        self.kill_mt5().await?;
+
+        // Write params *after* MT5 is dead so nothing can overwrite them.
         let ini_content = self.build_backtest_ini(params, report_id)?;
         let config_host = wine_prefix.join("drive_c").join("backtest_config.ini");
         fs::write(&config_host, ini_content.as_bytes())?;
         self.update_terminal_ini(params, report_id)?;
-
-        // Always kill any running MT5 — Wine allows only one instance per prefix.
-        self.kill_mt5().await?;
 
         // Record launch time before sleeping so find_newest_report doesn't miss
         // reports written during the startup wait.
@@ -759,8 +1174,13 @@ impl BacktestPipeline {
             tracing::info!("poll t+{}s: in_grace={} mt5_alive={}", elapsed, in_grace, mt5_alive);
 
             if !in_grace && !mt5_alive {
+                // MT5 writes the .htm report file right before exiting. There is a
+                // short window where the process is gone but the file hasn't been
+                // flushed to the directory. Wait 3 s to let Wine/macOS finish the
+                // write before we scan — this prevents false "no report" failures.
+                sleep(Duration::from_secs(3)).await;
                 if let Some(path) = Self::find_newest_report(&reports_dir, poll_start) {
-                    tracing::info!("poll: MT5 exited, found fallback report {}", path.display());
+                    tracing::info!("poll: MT5 exited, found report {}", path.display());
                     return Ok(path);
                 }
                 return Err(anyhow!(
@@ -963,23 +1383,16 @@ impl BacktestPipeline {
             );
 
             let script_path = std::env::temp_dir().join("mt5_backtest_launch.sh");
-            
-            // Only rewrite script if it doesn't exist or content differs (optimization)
-            let needs_write = !script_path.exists() || fs::read_to_string(&script_path).map(|existing| existing != script).unwrap_or(true);
-            
-            if needs_write {
-                fs::write(&script_path, &script)?;
-                // chmod +x
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&script_path,
-                        fs::Permissions::from_mode(0o755))?;
-                }
-                tracing::debug!("Created/updated launch script: {}", script_path.display());
-            } else {
-                tracing::debug!("Reusing existing launch script: {}", script_path.display());
+
+            // Always rewrite: script content changes per backtest (DYLD paths are
+            // dynamic) and we must ensure +x permissions are set every time.
+            fs::write(&script_path, &script)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))?;
             }
+            tracing::debug!("Wrote launch script: {}", script_path.display());
 
             tracing::info!("Launching MT5 via shell script (terminal.ini mode): {}", script_path.display());
             let mut cmd = Command::new("/bin/sh");
@@ -1072,22 +1485,42 @@ impl BacktestPipeline {
 
         tracing::info!("Stopping existing MT5 instance...");
         // SIGKILL immediately — MT5 holds no state we care about preserving.
-        let mut killed_any = false;
         for pat in &patterns {
-            let result = Command::new("pkill").args(["-KILL", "-f", pat.as_str()]).output();
-            if result.map(|o| o.status.success()).unwrap_or(false) {
-                killed_any = true;
+            let _ = Command::new("pkill").args(["-KILL", "-f", pat.as_str()]).output();
+        }
+        // Also kill wineserver so the Wine prefix is fully reset before relaunch.
+        // If wineserver is still alive when the new MT5 spawns, the new Wine
+        // instance may attach to the dying server and never enter tester mode.
+        let _ = Command::new("pkill").args(["-KILL", "-f", "wineserver"]).output();
+
+        // Poll until wineserver is actually gone (max 10 s) rather than sleeping
+        // a fixed amount. On macOS wineserver cleanup varies from 1 s to 6+ s.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            sleep(Duration::from_millis(500)).await;
+            let ws_alive = Command::new("pgrep")
+                .args(["-f", "wineserver"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            let mt5_alive = patterns.iter().any(|pat| {
+                Command::new("pgrep")
+                    .args(["-f", pat.as_str()])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            });
+            if !ws_alive && !mt5_alive {
+                tracing::info!("MT5 and wineserver fully exited");
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!("wineserver still alive after 10 s — proceeding anyway");
+                break;
             }
         }
-        let wineserver_result = Command::new("pkill").args(["-KILL", "-f", "wineserver"]).output();
-        if wineserver_result.map(|o| o.status.success()).unwrap_or(false) {
-            killed_any = true;
-        }
-        
-        // Only sleep if we actually killed something - skip if no processes were running
-        if killed_any {
-            sleep(Duration::from_secs(2)).await; // Reduced from 3s to 2s
-        }
+        // Brief extra pause to let the kernel release sockets and shared memory.
+        sleep(Duration::from_millis(500)).await;
 
         Ok(())
     }

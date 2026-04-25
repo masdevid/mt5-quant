@@ -508,29 +508,50 @@ impl Config {
         self.terminal_dir.as_ref().map(|d| Path::new(d).to_path_buf())
     }
 
-    /// Scan Bases/*/history/ for symbol directories that contain at least one .hcc file.
-    /// Returns deduplicated, sorted list of symbol names available for backtesting.
-    /// If server_filter is provided, only scans that specific server's directory.
+    /// Scan the tester's own history store for symbols with downloaded data.
+    ///
+    /// MT5 maintains two separate history trees:
+    ///   • `Bases/{server}/history/`  — live-trading tick/bar data (NOT usable by tester)
+    ///   • `Tester/bases/{server}/history/` — data the Strategy Tester actually reads
+    ///
+    /// Scanning `Bases/` (the old approach) returned symbols that exist for live trading
+    /// but may have no tester data, causing the tester to fail with "symbol does not exist".
+    /// This function scans `Tester/bases/` instead, which is the authoritative source.
+    ///
+    /// Falls back to `Bases/` only when `Tester/bases/` is absent (first-run / no backtests yet).
+    ///
+    /// If `server_filter` is provided only that server's directory is scanned.
     pub fn discover_symbols(&self, server_filter: Option<&str>) -> Vec<String> {
         let mt5_dir = match self.mt5_dir() {
             Some(d) => d,
             None => return Vec::new(),
         };
 
-        let bases_dir = mt5_dir.join("Bases");
-        if !bases_dir.is_dir() {
-            return Vec::new();
-        }
+        // Prefer the tester's own data store; fall back to live-trading Bases/ when absent.
+        let tester_bases = mt5_dir.join("Tester").join("bases");
+        let bases_dir = if tester_bases.is_dir() {
+            tester_bases
+        } else {
+            let fallback = mt5_dir.join("Bases");
+            if !fallback.is_dir() {
+                return Vec::new();
+            }
+            tracing::warn!(
+                "Tester/bases/ not found — falling back to Bases/ for symbol discovery. \
+                 Run at least one backtest to populate tester data."
+            );
+            fallback
+        };
 
         let mut symbols = std::collections::HashSet::new();
 
-        // Bases/{server}/history/{symbol}/{year}.hcc
+        // {bases_dir}/{server}/history/{symbol}/   — directory presence = data available
+        // (the tester uses .hst/.hcc files; existence of the directory is sufficient)
         if let Ok(servers) = fs::read_dir(&bases_dir) {
             for server in servers.filter_map(|e| e.ok()) {
                 let server_name_os = server.file_name();
                 let server_name = server_name_os.to_str().unwrap_or("");
-                
-                // Skip non-directory entries and filter by server if specified
+
                 if server_name.is_empty() {
                     continue;
                 }
@@ -539,7 +560,7 @@ impl Config {
                         continue;
                     }
                 }
-                
+
                 let history_dir = server.path().join("history");
                 if !history_dir.is_dir() {
                     continue;
@@ -550,23 +571,8 @@ impl Config {
                         if !sym_path.is_dir() {
                             continue;
                         }
-                        // Only include if at least one .hcc file exists (has downloaded data)
-                        let has_data = fs::read_dir(&sym_path)
-                            .ok()
-                            .map(|entries| {
-                                entries.filter_map(|e| e.ok()).any(|e| {
-                                    e.path().extension()
-                                        .and_then(|x| x.to_str())
-                                        .map(|x| x == "hcc")
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false);
-
-                        if has_data {
-                            if let Some(name) = sym_path.file_name().and_then(|n| n.to_str()) {
-                                symbols.insert(name.to_string());
-                            }
+                        if let Some(name) = sym_path.file_name().and_then(|n| n.to_str()) {
+                            symbols.insert(name.to_string());
                         }
                     }
                 }
@@ -576,6 +582,59 @@ impl Config {
         let mut sorted: Vec<String> = symbols.into_iter().collect();
         sorted.sort();
         sorted
+    }
+
+    /// Find the closest available tester symbol to the one requested.
+    ///
+    /// Matching priority (first hit wins):
+    ///   1. Exact match                           → `XAUUSD.cent` == `XAUUSD.cent`
+    ///   2. Case-insensitive exact match          → `xauusd.cent` → `XAUUSD.cent`
+    ///   3. Strip/add common cent suffixes        → `XAUUSDc` ↔ `XAUUSD.cent`
+    ///   4. Prefix match on the base ticker       → `XAUUSD` matches `XAUUSD.cent`
+    pub fn resolve_symbol<'a>(requested: &str, available: &'a [String]) -> Option<&'a str> {
+        if available.is_empty() {
+            return None;
+        }
+
+        // 1. Exact
+        if let Some(s) = available.iter().find(|s| s.as_str() == requested) {
+            return Some(s.as_str());
+        }
+
+        // 2. Case-insensitive exact
+        let req_lower = requested.to_lowercase();
+        if let Some(s) = available.iter().find(|s| s.to_lowercase() == req_lower) {
+            return Some(s.as_str());
+        }
+
+        // 3. Cent-suffix normalisation: build a normalised "base" for both sides
+        //    Strip known cent suffixes: `.cent`, `c` (trailing, uppercase only), `.c`
+        fn base_ticker(sym: &str) -> &str {
+            let s = sym.trim_end_matches(".cent")
+                       .trim_end_matches(".c");
+            // Strip trailing lowercase 'c' only when the rest is all-uppercase
+            // (so "XAUUSDc" → "XAUUSD", but "Misc" stays "Misc")
+            if s.ends_with('c') && s[..s.len()-1].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
+                &s[..s.len()-1]
+            } else {
+                s
+            }
+        }
+
+        let req_base = base_ticker(requested).to_lowercase();
+        if let Some(s) = available.iter().find(|s| base_ticker(s).to_lowercase() == req_base) {
+            return Some(s.as_str());
+        }
+
+        // 4. Prefix match: available symbol starts with the requested string (or vice-versa)
+        if let Some(s) = available.iter().find(|s| {
+            let sl = s.to_lowercase();
+            sl.starts_with(&req_lower) || req_lower.starts_with(sl.as_str())
+        }) {
+            return Some(s.as_str());
+        }
+
+        None
     }
 
     /// Get the currently active MT5 account from common.ini

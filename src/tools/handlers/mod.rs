@@ -70,10 +70,11 @@ impl ToolHandler {
             
             // Backtest handlers - Granular pipeline options
             "run_backtest" => backtest::handle_run_backtest(&self.config, args).await,           // Full: compile + clean + backtest + extract + analyze
-            "run_backtest_quick" => backtest::handle_run_backtest_quick(&self.config, args).await, // Quick: skip compile, do backtest + extract + analyze
-            "run_backtest_only" => backtest::handle_run_backtest_only(&self.config, args).await,  // Minimal: skip compile, do backtest + extract only
+            "run_backtest_quick" => backtest::handle_run_backtest_quick(self, args).await, // Quick: skip compile, fire-and-forget launch
+            "run_backtest_only" => backtest::handle_run_backtest_only(self, args).await,  // Minimal: skip compile+analyze, fire-and-forget launch
             "launch_backtest" => backtest::handle_launch_backtest(self, args).await,     // Fire-and-forget mode
             "get_backtest_status" => backtest::handle_get_backtest_status(&self.config, args).await,
+            "get_tester_log"      => backtest::handle_get_tester_log(&self.config, args).await,
             "cache_status" => backtest::handle_cache_status(&self.config).await,
             "clean_cache" => backtest::handle_clean_cache(&self.config, args).await,
             

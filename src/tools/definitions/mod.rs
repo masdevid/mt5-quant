@@ -18,6 +18,7 @@ pub fn get_tools_list() -> Value {
         backtest::tool_run_backtest_only(),      // Minimal: skip compile, do clean + backtest + extract only
         backtest::tool_launch_backtest(),        // Fire-and-forget: compile + clean + launch MT5
         backtest::tool_get_backtest_status(),    // Poll for completion
+        backtest::tool_get_tester_log(),         // Live journal reading mid-backtest or after
         backtest::tool_cache_status(),
         backtest::tool_clean_cache(),
         // Optimization

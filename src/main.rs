@@ -148,6 +148,7 @@ async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Resu
         timeout: 900,
         gui: false,
         startup_delay_secs: delay,
+        inactivity_kill_secs: None,
     };
     
     let pipeline = BacktestPipeline::new(config);

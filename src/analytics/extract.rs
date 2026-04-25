@@ -77,59 +77,96 @@ impl ReportExtractor {
     fn parse_deals_html(&self, text: &str) -> Result<Vec<Deal>> {
         let mut deals = Vec::new();
 
-        let re = regex::Regex::new(r"<tr[^>]*>.*?Deal.*?Time.*?Type.*?Direction.*?</tr>(.*)")
-            .map_err(|e| anyhow!("Regex error: {}", e))?;
+        // (?s) = dotall: makes '.' match '\n' so the regex works on multiline HTML.
+        // MT5 HTML column order: Time | Deal | Symbol | Type | Direction |
+        //                        Volume | Price | Order | Commission | Swap | Profit | Balance | Comment
+        //
+        // Strategy: locate the deals table by finding the header <tr> that contains
+        // the column names, then parse every subsequent <tr> as a data row.
+        // We try two header patterns to handle different MT5 versions/locales.
 
-        if let Some(captures) = re.captures(text) {
-            let section = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+        let row_re = regex::Regex::new(r"(?s)<tr[^>]*>(.*?)</tr>")
+            .map_err(|e| anyhow!("Row regex error: {}", e))?;
+        let cell_re = regex::Regex::new(r"(?s)<td[^>]*>(.*?)</td>")
+            .map_err(|e| anyhow!("Cell regex error: {}", e))?;
 
-            let row_re = regex::Regex::new(r"<tr[^>]*>(.*?)</tr>")
-                .map_err(|e| anyhow!("Regex error: {}", e))?;
+        // Collect all <tr> blocks once, then find the deals header and parse from there.
+        let rows: Vec<&str> = row_re.captures_iter(text)
+            .filter_map(|cap| cap.get(0).map(|m| m.as_str()))
+            .collect();
 
-            for row_caps in row_re.captures_iter(section) {
-                let row = row_caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                
-                let cell_re = regex::Regex::new(r"<td[^>]*>(.*?)</td>")
-                    .map_err(|e| anyhow!("Regex error: {}", e))?;
-                
-                let cells: Vec<String> = cell_re.captures_iter(row)
-                    .filter_map(|cap| cap.get(1))
-                    .map(|m| Self::strip_tags(m.as_str()))
-                    .map(|s| s.replace(',', ""))
-                    .collect();
+        // Find the header row index: it must contain both "Deal" and "Symbol" (case-insensitive).
+        let header_idx = rows.iter().position(|row| {
+            let lower = row.to_lowercase();
+            (lower.contains(">deal<") || lower.contains(">deal </")) &&
+            (lower.contains(">symbol<") || lower.contains(">symbol </"))
+        });
 
-                if cells.len() < 3 || cells[0].is_empty() {
-                    continue;
+        let start_idx = match header_idx {
+            Some(i) => i + 1,
+            None => {
+                // Fallback: look for any row containing Time+Volume+Profit headers
+                let alt = rows.iter().position(|row| {
+                    let lower = row.to_lowercase();
+                    lower.contains(">time<") && lower.contains(">volume<") && lower.contains(">profit<")
+                });
+                match alt {
+                    Some(i) => i + 1,
+                    None => {
+                        tracing::warn!("parse_deals_html: no deals table header found");
+                        return Ok(deals);
+                    }
                 }
-
-                if cells.iter().take(5).any(|c| {
-                    let c_lower = c.trim().to_lowercase();
-                    c_lower == "balance" || c_lower == "credit"
-                }) {
-                    continue;
-                }
-
-                let deal = Deal {
-                    time: cells.get(0).cloned().unwrap_or_default(),
-                    deal: cells.get(1).cloned().unwrap_or_default(),
-                    symbol: cells.get(2).cloned().unwrap_or_default(),
-                    deal_type: cells.get(3).cloned().unwrap_or_default(),
-                    entry: cells.get(4).cloned().unwrap_or_default(),
-                    volume: cells.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    price: cells.get(6).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    order: cells.get(7).cloned().unwrap_or_default(),
-                    commission: cells.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    swap: cells.get(9).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    profit: cells.get(10).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    balance: cells.get(11).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    comment: cells.get(12).cloned().unwrap_or_default(),
-                    magic: cells.get(13).cloned(),
-                };
-
-                deals.push(deal);
             }
+        };
+
+        for row in &rows[start_idx..] {
+            let cells: Vec<String> = cell_re.captures_iter(row)
+                .filter_map(|cap| cap.get(1))
+                .map(|m| Self::strip_tags(m.as_str()))
+                .map(|s| s.replace(',', ""))
+                .collect();
+
+            if cells.len() < 3 || cells[0].trim().is_empty() {
+                continue;
+            }
+
+            // Skip balance/credit operation rows (Type column is index 3 in MT5 HTML)
+            let type_cell = cells.get(3).map(|s| s.trim().to_lowercase()).unwrap_or_default();
+            if type_cell == "balance" || type_cell == "credit" {
+                continue;
+            }
+            // Also skip sub-header rows that repeat column names
+            if type_cell == "type" || cells.get(1).map(|s| s.trim().to_lowercase()).as_deref() == Some("deal") {
+                continue;
+            }
+            // Skip rows with no deal number (e.g. totals row)
+            let deal_num = cells.get(1).map(|s| s.trim().to_string()).unwrap_or_default();
+            if deal_num.is_empty() {
+                continue;
+            }
+
+            let deal = Deal {
+                time:       cells.get(0).cloned().unwrap_or_default(),
+                deal:       deal_num,
+                symbol:     cells.get(2).cloned().unwrap_or_default(),
+                deal_type:  cells.get(3).cloned().unwrap_or_default(),
+                entry:      cells.get(4).cloned().unwrap_or_default(),
+                volume:     cells.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                price:      cells.get(6).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                order:      cells.get(7).cloned().unwrap_or_default(),
+                commission: cells.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                swap:       cells.get(9).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                profit:     cells.get(10).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                balance:    cells.get(11).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                comment:    cells.get(12).cloned().unwrap_or_default(),
+                magic:      cells.get(13).cloned(),
+            };
+
+            deals.push(deal);
         }
 
+        tracing::info!("parse_deals_html: extracted {} deals", deals.len());
         Ok(deals)
     }
 

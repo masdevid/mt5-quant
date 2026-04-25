@@ -79,6 +79,9 @@ pub struct BacktestJob {
     pub mt5_pid: Option<u32>,
     pub expected_report_path: String,
     pub timeout_seconds: u64,
+    /// Set by background monitor: "running"|"completed"|"completed_no_html"|"failed"|"timeout"
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 impl BacktestJob {
@@ -101,6 +104,7 @@ impl BacktestJob {
             mt5_pid: None,
             expected_report_path,
             timeout_seconds,
+            status: Some("running".to_string()),
         }
     }
 }

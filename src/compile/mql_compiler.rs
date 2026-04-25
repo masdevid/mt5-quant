@@ -90,8 +90,8 @@ impl MqlCompiler {
             .map(|s| s.to_string())
             .collect();
 
-        let ex5_path = staged_mq5.with_extension("ex5");
-        if !ex5_path.exists() {
+        let staged_ex5 = staged_mq5.with_extension("ex5");
+        if !staged_ex5.exists() {
             let final_errors = if errors.is_empty() {
                 vec![format!("Compilation failed. Log:\n{}", &log_text[log_text.len().saturating_sub(500)..])]
             } else {
@@ -107,11 +107,37 @@ impl MqlCompiler {
             });
         }
 
-        let binary_size = fs::metadata(&ex5_path)?.len();
+        let binary_size = fs::metadata(&staged_ex5)?.len();
+
+        // Deploy compiled output to the real MQL5/Experts/{ea_name}/ directory so
+        // MT5 can actually load it. The temp dir is only needed to avoid Wine path
+        // issues with spaces; the real experts dir is the authoritative location.
+        let final_ex5_path = if let Some(experts_dir) = self.config.experts_dir.as_ref() {
+            let real_experts = PathBuf::from(experts_dir);
+            let real_ea_dir = real_experts.join(ea_name);
+            fs::create_dir_all(&real_ea_dir)?;
+
+            // Sync source files (.mq5 + .mqh) into the real experts dir so that
+            // future compiles from the experts dir also work correctly.
+            if let Err(e) = self.sync_project_to_experts(source_path, &real_experts) {
+                tracing::warn!("Could not sync source to experts dir: {}", e);
+            }
+
+            // Copy the compiled .ex5 to the real experts dir.
+            let dest_ex5 = real_ea_dir.join(format!("{}.ex5", ea_name));
+            fs::copy(&staged_ex5, &dest_ex5)?;
+            tracing::info!("Deployed {} → {}", staged_ex5.display(), dest_ex5.display());
+            dest_ex5
+        } else {
+            // No experts_dir configured — fall back to the staged path so callers
+            // still get a valid path even if MT5 won't find it automatically.
+            tracing::warn!("experts_dir not configured; .ex5 left in staging dir");
+            staged_ex5
+        };
 
         Ok(CompileResult {
             success: errors.is_empty(),
-            ex5_path: Some(ex5_path),
+            ex5_path: Some(final_ex5_path),
             errors,
             warnings,
             binary_size,
