@@ -69,6 +69,41 @@ Set `MT5_MCP_HOME` or ensure config exists at:
 
 4. **Date range has no trades** — try wider range or confirm symbol was active.
 
+## Backtest Completes But Always Shows "journal-only" (No HTML Report)
+
+**Symptom:** Every backtest produces `status: completed_no_html` and all deal profits are `0.0`.
+
+**Cause:** On Wine/macOS, `ShutdownTerminal=1` does **not** cause `terminal64.exe` to exit after the
+test completes. The tester agent (MetaTester 5) closes normally, but the terminal process stays alive
+indefinitely. Without process exit, MT5 never writes the HTML report.
+
+**How the pipeline handles this:** The inactivity watchdog detects that the tester log has stopped
+growing (test done), waits 30 seconds polling for the HTML file, then kills `terminal64.exe`
+unconditionally. If the HTML appears during the wait it is extracted; otherwise journal extraction
+provides deal counts and final balance (but no per-deal P&L).
+
+**To maximise HTML report chances:** Use `inactivity_kill_secs=120` (default) with `shutdown=true`
+(default). This gives MT5 120s of quiet time + 30s of HTML-wait before the kill.
+
+```
+launch_backtest(expert: "MyEA", shutdown: true, inactivity_kill_secs: 120)
+```
+
+**Fallback data available from journal:**
+- Deal count, volume, prices, timestamps ✓
+- Final balance (pips) ✓
+- Per-deal profit/loss ✗ (always 0.0)
+- Win rate, profit factor, Sharpe, drawdown ✗ (require HTML)
+
+## `list_deals` Returns 0 Filtered Results
+
+Analytics tools filter deals with `is_closed_trade()` which checks `entry = "out"`. If all deals
+show `entry = "in"`, the position tracker that infers direction from signed lot accumulation may
+not have run (old binary in memory).
+
+**Fix:** Restart the MCP server (restart Claude Code / your IDE) after installing a new binary.
+The server process caches the binary in memory — `install` doesn't hot-reload it.
+
 ## MetaEditor Compile Errors
 
 Check `<terminal_dir>/MQL5/Logs/`:

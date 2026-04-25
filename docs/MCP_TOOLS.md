@@ -185,10 +185,14 @@ Fire-and-forget mode: compile → clean → launch MT5 backtest, return immediat
   deposit?: number;        // Initial deposit (default: 10000)
   model?: 0 | 1 | 2;      // Tick model (default: 0)
   set_file?: string;       // Path to .set parameter file
-  skip_compile?: boolean;  // Skip compilation
-  skip_clean?: boolean;    // Skip cache cleaning
-  timeout?: number;        // Max time in seconds (default: 900)
-  gui?: boolean;          // Enable MT5 visualization
+  skip_compile?: boolean;         // Skip compilation
+  skip_clean?: boolean;           // Skip cache cleaning
+  timeout?: number;               // Max time in seconds (default: 900)
+  gui?: boolean;                  // Enable MT5 visualization
+  shutdown?: boolean;             // Shut down MT5 after test (default: true)
+  inactivity_kill_secs?: number;  // Kill MT5 if tester log silent for N seconds (default: 120).
+                                  // After silence, pipeline waits 30s for HTML then kills MT5.
+                                  // Set to 0 to disable. Useful to abort stalled EAs.
 }
 ```
 
