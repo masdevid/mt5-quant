@@ -17,8 +17,8 @@
   `find_active_tester_agent_log` now prefers `Agent-127.0.0.1` and tiebreaks by file size.
 
 ### Added
-- `launch_backtest` exposes `shutdown` (default `true`) and `inactivity_kill_secs` (default `120`)
-  as explicit tool parameters.
+- `launch_backtest` exposes `shutdown` (default `true`) and `inactivity_kill_secs` (default: disabled;
+  set to e.g. `120` to enable the inactivity watchdog) as explicit tool parameters.
 - Report DB stores deals in SQLite; all analytics tools resolve by `report_id` / `report_dir` / latest.
 
 ### Verified

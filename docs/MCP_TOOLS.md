@@ -189,10 +189,14 @@ Fire-and-forget mode: compile → clean → launch MT5 backtest, return immediat
   skip_clean?: boolean;           // Skip cache cleaning
   timeout?: number;               // Max time in seconds (default: 900)
   gui?: boolean;                  // Enable MT5 visualization
-  shutdown?: boolean;             // Shut down MT5 after test (default: true)
-  inactivity_kill_secs?: number;  // Kill MT5 if tester log silent for N seconds (default: 120).
-                                  // After silence, pipeline waits 30s for HTML then kills MT5.
-                                  // Set to 0 to disable. Useful to abort stalled EAs.
+  shutdown?: boolean;             // Shut down MT5 after test (default: true).
+                                  // NOTE: on Wine/macOS terminal64.exe may not exit naturally
+                                  // even with ShutdownTerminal=1. Use inactivity_kill_secs too.
+  inactivity_kill_secs?: number;  // Kill MT5 if tester log hasn't grown for N seconds
+                                  // (default: disabled / not set). Recommended: 120.
+                                  // After silence, pipeline polls for HTML report for 30s,
+                                  // then kills MT5 unconditionally. If HTML present → extracted;
+                                  // otherwise falls back to journal extraction (no P&L data).
 }
 ```
 

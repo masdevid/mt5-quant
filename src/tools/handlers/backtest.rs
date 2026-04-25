@@ -338,10 +338,11 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
         skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
         skip_analyze: true, // Not needed for launch mode
         deep_analyze: false,
-        // ShutdownTerminal=1 (default): MT5 writes the HTML report and exits cleanly.
-        // The background monitor's post-exit scan finds the report within 10s.
-        // The inactivity watchdog is intentionally skipped when shutdown=true so it
-        // doesn't race with MT5's report write right before natural exit.
+        // On Wine/macOS, ShutdownTerminal=1 does NOT reliably cause terminal64.exe to exit.
+        // When inactivity_kill_secs is set, the monitor waits that many seconds after the
+        // tester log goes quiet, then polls for the HTML report for 30 s, then kills MT5.
+        // If no inactivity_kill_secs is given (default None → disabled), the monitor relies
+        // solely on timeout (900 s) or natural MT5 exit for completion detection.
         shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true),
         kill_existing: false,
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),

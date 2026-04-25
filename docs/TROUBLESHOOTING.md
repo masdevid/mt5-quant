@@ -82,8 +82,9 @@ growing (test done), waits 30 seconds polling for the HTML file, then kills `ter
 unconditionally. If the HTML appears during the wait it is extracted; otherwise journal extraction
 provides deal counts and final balance (but no per-deal P&L).
 
-**To maximise HTML report chances:** Use `inactivity_kill_secs=120` (default) with `shutdown=true`
-(default). This gives MT5 120s of quiet time + 30s of HTML-wait before the kill.
+**To maximise HTML report chances:** Pass `inactivity_kill_secs=120` explicitly (it is disabled by
+default). With `shutdown=true` (default) this gives MT5 120s of quiet time + 30s of HTML-wait before
+the kill.
 
 ```
 launch_backtest(expert: "MyEA", shutdown: true, inactivity_kill_secs: 120)
