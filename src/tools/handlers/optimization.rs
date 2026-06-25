@@ -27,7 +27,6 @@ pub async fn handle_run_optimization(config: &Config, args: &Value) -> Result<Va
         from_date: from_date.to_string(),
         to_date: to_date.to_string(),
         deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
-        model: 0,
         leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
         currency: args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD").to_string(),
     };

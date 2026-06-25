@@ -247,19 +247,21 @@ impl Config {
 
     fn find_wine(home: &Path) -> Option<String> {
         let candidates: &[PathBuf] = &[
-            // macOS: bundled with the official MT5 app
+            // macOS: bundled with the official MT5 app (binary is just named 'wine' on recent builds)
+            PathBuf::from("/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine"),
             PathBuf::from("/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine64"),
-            // macOS: CrossOver
+            // macOS: CrossOver (new versions may use 'wine', older ones 'wine64')
+            home.join("Applications/CrossOver.app/Contents/SharedSupport/CrossOver/wine/bin/wine"),
             home.join("Applications/CrossOver.app/Contents/SharedSupport/CrossOver/wine/bin/wine64"),
-            // macOS: Homebrew (Apple Silicon)
-            PathBuf::from("/opt/homebrew/bin/wine64"),
+            // macOS: Homebrew Apple Silicon (prefer 'wine', fall back to 'wine64')
             PathBuf::from("/opt/homebrew/bin/wine"),
-            // macOS: Homebrew (Intel)
-            PathBuf::from("/usr/local/bin/wine64"),
+            PathBuf::from("/opt/homebrew/bin/wine64"),
+            // macOS: Homebrew Intel
             PathBuf::from("/usr/local/bin/wine"),
+            PathBuf::from("/usr/local/bin/wine64"),
             // Linux
-            PathBuf::from("/usr/bin/wine64"),
             PathBuf::from("/usr/bin/wine"),
+            PathBuf::from("/usr/bin/wine64"),
         ];
         candidates.iter()
             .find(|p| p.exists())

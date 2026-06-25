@@ -3,16 +3,32 @@ use serde_json::{json, Value};
 use std::fs;
 use crate::models::Config;
 
+/// Read a file that may be UTF-16LE (with BOM) or UTF-8, returning a UTF-8 String.
+fn read_file_as_utf8(path: &str) -> Result<String> {
+    let bytes = fs::read(path)?;
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let utf16_data: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&utf16_data)
+            .map_err(|e| anyhow::anyhow!("Failed to decode UTF-16LE: {}", e))
+    } else {
+        String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to decode as UTF-8: {}", e))
+    }
+}
+
 pub async fn handle_read_set_file(args: &Value) -> Result<Value> {
     let path = args.get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
-    let content = fs::read_to_string(path)?;
+    let content = read_file_as_utf8(path)?;
     let mut params = serde_json::Map::new();
 
     for line in content.lines() {
-        if let Some((key, value)) = line.split_once(':') {
+        if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let value = value.trim();
             
@@ -86,7 +102,7 @@ pub async fn handle_patch_set_file(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_object())
         .ok_or_else(|| anyhow::anyhow!("patches object is required"))?;
 
-    let content = fs::read_to_string(path)?;
+    let content = read_file_as_utf8(path)?;
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let mut patched_count = 0;
 
@@ -164,8 +180,8 @@ pub async fn handle_diff_set_files(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("file_b is required"))?;
 
-    let content_a = fs::read_to_string(file_a)?;
-    let content_b = fs::read_to_string(file_b)?;
+    let content_a = read_file_as_utf8(file_a)?;
+    let content_b = read_file_as_utf8(file_b)?;
 
     let mut differences = Vec::new();
 
@@ -223,20 +239,21 @@ pub async fn handle_describe_sweep(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
-    let content = fs::read_to_string(path)?;
+    let content = read_file_as_utf8(path)?;
     let mut sweep_params = serde_json::Map::new();
 
     for line in content.lines() {
-        if let Some((key, value)) = line.split_once(':') {
+        if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let value = value.trim();
             
             if value.contains("||Y") {
-                if let Some((from_val, to_val)) = value.split_once("..") {
+                let parts: Vec<&str> = value.split("||").collect();
+                if parts.len() >= 5 && parts[4].trim().to_uppercase() == "Y" {
                     sweep_params.insert(key.to_string(), json!({
-                        "from": from_val.trim(),
-                        "to": to_val.trim().replace("||Y", ""),
-                        "step": 1.0
+                        "from": parts[1].trim(),
+                        "to": parts[3].trim(),
+                        "step": parts[2].trim(),
                     }));
                 }
             }
@@ -266,7 +283,7 @@ pub async fn handle_list_set_files(config: &Config) -> Result<Value> {
                         .unwrap_or("unknown")
                         .to_string();
 
-                    let content = fs::read_to_string(&path).unwrap_or_default();
+                    let content = read_file_as_utf8(&path.to_string_lossy()).unwrap_or_default();
                     let param_count = content.lines().filter(|l| l.contains(':')).count();
                     let sweep_count = content.lines().filter(|l| l.contains("||Y")).count();
 

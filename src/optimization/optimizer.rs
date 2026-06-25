@@ -6,6 +6,27 @@ use std::process::{Command, Stdio};
 
 use crate::models::Config;
 
+/// Read a file that may be UTF-16LE (with BOM) or UTF-8, returning a UTF-8 String.
+/// MT5 .set and .ini files are typically UTF-16LE with BOM (0xFF 0xFE).
+fn read_file_as_utf8(path: &Path) -> Result<String> {
+    let bytes = fs::read(path)?;
+    
+    // Check for UTF-16LE BOM (0xFF 0xFE)
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        // UTF-16LE with BOM - skip the 2-byte BOM and decode
+        let utf16_data: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16(&utf16_data)
+            .map_err(|e| anyhow!("Failed to decode UTF-16LE: {}", e))
+    } else {
+        // Try UTF-8
+        String::from_utf8(bytes)
+            .map_err(|e| anyhow!("Failed to decode as UTF-8: {}", e))
+    }
+}
+
 pub struct OptimizationParams {
     pub expert: String,
     pub set_file: String,
@@ -13,7 +34,6 @@ pub struct OptimizationParams {
     pub from_date: String,
     pub to_date: String,
     pub deposit: u32,
-    pub model: u8,
     pub leverage: u32,
     pub currency: String,
 }
@@ -27,7 +47,6 @@ impl Default for OptimizationParams {
             from_date: String::new(),
             to_date: String::new(),
             deposit: 10000,
-            model: 0,
             leverage: 500,
             currency: "USD".to_string(),
         }
@@ -78,7 +97,8 @@ impl OptimizationRunner {
         let log_file = PathBuf::from(format!("/tmp/mt5opt_{}.log", timestamp));
 
         // Count combinations
-        let combinations = self.count_combinations(&params.set_file)?;
+        let combinations = self.count_combinations(&params.set_file)
+            .map_err(|e| anyhow!("count_combinations failed: {}", e))?;
 
         // Get paths
         let mt5_dir = self.config.terminal_dir.as_ref()
@@ -89,50 +109,167 @@ impl OptimizationRunner {
         // Write .set file as UTF-16LE with BOM directly to MT5 tester directory
         let wine_prefix_dir = self.get_wine_prefix_dir(mt5_dir)?;
         let tester_dir = wine_prefix_dir.join("drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester");
-        fs::create_dir_all(&tester_dir)?;
+        fs::create_dir_all(&tester_dir).map_err(|e| anyhow!("create_dir_all({}) failed: {}", tester_dir.display(), e))?;
         let dst_set_file = tester_dir.join(format!("{}.set", params.expert));
-        self.write_utf16le_set(&params.set_file, &dst_set_file)?;
+        self.write_utf16le_set(&params.set_file, &dst_set_file)
+            .map_err(|e| anyhow!("write_utf16le_set({}) failed: {}", dst_set_file.display(), e))?;
 
         // Reset OptMode in terminal.ini
-        self.reset_optmode(mt5_dir)?;
+        // Patch terminal.ini [Tester] section with optimization params (primary mechanism)
+        let terminal_ini = if Path::new(mt5_dir).join("config").exists() {
+            Path::new(mt5_dir).join("config").join("terminal.ini")
+        } else {
+            Path::new(mt5_dir).join("terminal.ini")
+        };
+        let mt5_ini_text = if terminal_ini.exists() {
+            read_file_as_utf8(&terminal_ini).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let expert_path = if let Some(experts_dir) = &self.config.experts_dir {
+            let nested = Path::new(experts_dir).join(&params.expert).join(format!("{}.mq5", params.expert));
+            if nested.exists() {
+                format!("Experts\\{}\\{}.ex5", params.expert, params.expert)
+            } else {
+                format!("Experts\\{}.ex5", params.expert)
+            }
+        } else {
+            format!("Experts\\{}.ex5", params.expert)
+        };
+        let tester_section = format!(
+            "[Tester]\n\
+             Expert={}\n\
+             ExpertParameters={}.set\n\
+             Symbol={}\n\
+             Period=M1\n\
+             Model=4\n\
+             FromDate={}\n\
+             ToDate={}\n\
+             ForwardMode=0\n\
+             Deposit={}\n\
+             Currency={}\n\
+             ProfitInPips=0\n\
+             Leverage={}\n\
+             Execution=10\n\
+             Optimization=2\n\
+             Agents=10\n\
+             Visual=0\n\
+             Report=reports\\opt_report.htm\n\
+             ReplaceReport=1\n\
+             ShutdownTerminal=1",
+             expert_path, params.expert, params.symbol,
+            params.from_date, params.to_date, params.deposit, params.currency, params.leverage,
+        );
+        let agents_section = "\
+             [Agents]\n\
+             Agent0000=11111111-1111-1111-1111-111111111111\n\
+             AgentStatus0000=3\n\
+             AgentState0000=0\n\
+             Enabled0000=1\n\
+             IP0000=127.0.0.1\n\
+             Port0000=3000\n\
+             Agent0001=22222222-2222-2222-2222-222222222222\n\
+             AgentStatus0001=3\n\
+             AgentState0001=0\n\
+             Enabled0001=1\n\
+             IP0001=127.0.0.1\n\
+             Port0001=3001\n\
+             Agent0002=33333333-3333-3333-3333-333333333333\n\
+             AgentStatus0002=3\n\
+             AgentState0002=0\n\
+             Enabled0002=1\n\
+             IP0002=127.0.0.1\n\
+             Port0002=3002\n\
+             Agent0003=44444444-4444-4444-4444-444444444444\n\
+             AgentStatus0003=3\n\
+             AgentState0003=0\n\
+             Enabled0003=1\n\
+             IP0003=127.0.0.1\n\
+             Port0003=3003";
+        let updated_ini = Self::patch_ini_section(&mt5_ini_text, "Tester", &tester_section);
+        // Strip any stale [Agents] sections from previous runs, then append fresh one
+        let cleaned = Self::strip_ini_section(&updated_ini, "Agents");
+        let final_ini = format!("{}\n{}", cleaned.trim_end(), agents_section);
+        let mut utf16_out: Vec<u8> = vec![0xFF, 0xFE];
+        utf16_out.extend(final_ini.encode_utf16().flat_map(|c| c.to_le_bytes()));
+        fs::write(&terminal_ini, utf16_out)?;
 
-        // Get Wine prefix directory
-        let wine_prefix_dir = self.get_wine_prefix_dir(mt5_dir)?;
+        // Write /config: INI to trigger tester/optimizer mode
+        // For /config: format, Expert path is relative to MQL5/Experts/ (no Experts\ prefix)
+        let opt_config_win = r"C:\mt5opt_config.ini";
+        let opt_config_host = wine_prefix_dir.join("drive_c").join("mt5opt_config.ini");
+        let mut opt_ini = String::new();
+        if let Some(login) = &self.config.backtest_login {
+            if let Some(server) = &self.config.backtest_server {
+                opt_ini.push_str("[Common]\n");
+                opt_ini.push_str(&format!("Login={}\n", login));
+                opt_ini.push_str(&format!("Server={}\n", server));
+                if let Some(password) = &self.config.backtest_password {
+                    opt_ini.push_str(&format!("Password={}\n", password));
+                }
+                opt_ini.push_str("\n");
+            }
+        }
+        opt_ini.push_str("[Tester]\n");
+        opt_ini.push_str(&format!("Expert={}.ex5\n", params.expert));
+        opt_ini.push_str(&format!("ExpertParameters={}.set\n", params.expert));
+        opt_ini.push_str(&format!("Symbol={}\n", params.symbol));
+        opt_ini.push_str("Period=M1\n");
+        opt_ini.push_str("Optimization=2\n");
+        opt_ini.push_str(&format!("FromDate={}\n", params.from_date));
+        opt_ini.push_str(&format!("ToDate={}\n", params.to_date));
+        opt_ini.push_str("ForwardMode=0\n");
+        opt_ini.push_str(&format!("Deposit={}\n", params.deposit));
+        opt_ini.push_str(&format!("Currency={}\n", params.currency));
+        opt_ini.push_str("ProfitInPips=0\n");
+        opt_ini.push_str(&format!("Leverage={}\n", params.leverage));
+        opt_ini.push_str("Execution=10\n");
+        opt_ini.push_str("Visual=0\n");
+        opt_ini.push_str("Report=reports\\opt_report.htm\n");
+        opt_ini.push_str("ReplaceReport=1\n");
+        opt_ini.push_str("ShutdownTerminal=1\n");
+        fs::write(&opt_config_host, opt_ini.as_bytes())?;
 
-        // Build optimization INI
-        let ini_path = wine_prefix_dir.join("drive_c/mt5mcp_backtest.ini");
-        let ini_content = format!(r#"[Tester]
-Expert={}
-Symbol={}
-Period=M5
-Deposit={}
-Currency={}
-Leverage={}
-Model={}
-FromDate={}
-ToDate={}
-Report=C:\mt5mcp_opt_report
-Optimization=2
-ExpertParameters={}.set
-ShutdownTerminal=1
-"#, params.expert, params.symbol, params.deposit, params.currency, 
-            params.leverage, params.model, params.from_date, params.to_date, params.expert);
-        fs::write(&ini_path, ini_content)?;
+        // Build launch script (macOS-compatible with /config: to trigger tester mode)
+        let wine_bin = Path::new(wine_exe);
+        let wine_root = wine_bin
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow!("Cannot derive Wine root from wine_exe"))?;
+        let ext_libs  = wine_root.join("lib").join("external");
+        let wine_libs = wine_root.join("lib");
+        let dyld = format!("{}:{}:/usr/lib:/usr/local/lib",
+            ext_libs.display(), wine_libs.display());
+        let terminal_host = wine_prefix_dir.join("drive_c")
+            .join("Program Files").join("MetaTrader 5").join("terminal64.exe");
 
-        // Build batch file
-        let batch_path = wine_prefix_dir.join("drive_c/mt5mcp_run.bat");
-        let batch_content = format!(r#"@echo off
-"C:\Program Files\MetaTrader 5\terminal64.exe" /config:C:\mt5mcp_backtest.ini
-"#);
-        fs::write(&batch_path, batch_content)?;
+        let script = format!(
+            "#!/bin/sh\n\
+             export DYLD_FALLBACK_LIBRARY_PATH='{dyld}'\n\
+             export WINEPREFIX='{prefix}'\n\
+             export WINEDEBUG='-all'\n\
+             nohup '{wine}' '{terminal}' '/config:{config}' >/dev/null 2>&1 &\n",
+            dyld     = dyld,
+            prefix   = wine_prefix_dir.display(),
+            wine     = wine_exe,
+            terminal = terminal_host.display(),
+            config   = opt_config_win,
+        );
 
-        // Launch detached process
-        let cmd = format!("cmd.exe /c 'C:\\mt5mcp_run.bat'");
-        let child = Command::new(wine_exe)
-            .arg(&cmd)
+        let script_path = std::env::temp_dir().join("mt5opt_launch.sh");
+        fs::write(&script_path, &script)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))?;
+        }
+
+        let child = Command::new("/bin/sh")
+            .arg(&script_path)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()?;
+            .spawn()
+            .map_err(|e| anyhow!("spawn /bin/sh {} failed: {}", script_path.display(), e))?;
 
         let pid = child.id();
 
@@ -150,7 +287,7 @@ ShutdownTerminal=1
     }
 
     fn count_combinations(&self, set_file: &str) -> Result<u64> {
-        let content = fs::read_to_string(set_file)?;
+        let content = read_file_as_utf8(Path::new(set_file))?;
         let mut total: u64 = 1;
 
         for line in content.lines() {
@@ -179,11 +316,21 @@ ShutdownTerminal=1
     }
 
     fn write_utf16le_set(&self, src: &str, dst: &Path) -> Result<()> {
-        let content = fs::read_to_string(src)?;
+        let content = read_file_as_utf8(Path::new(src))?;
         
         // Create parent directory if needed
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
+        }
+
+        // Remove existing file if read-only from previous run
+        if dst.exists() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(dst, fs::Permissions::from_mode(0o644));
+            }
+            let _ = fs::remove_file(dst);
         }
 
         // Write UTF-16LE with BOM
@@ -195,49 +342,17 @@ ShutdownTerminal=1
             .collect();
         
         fs::write(dst, bytes)?;
-        
-        // Make read-only
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(dst, fs::Permissions::from_mode(0o444))?;
-        }
 
-        Ok(())
-    }
-
-    fn reset_optmode(&self, mt5_dir: &str) -> Result<()> {
-        let terminal_ini = Path::new(mt5_dir).join("terminal.ini");
-        
-        if !terminal_ini.exists() {
-            return Ok(());
-        }
-
-        let content = fs::read_to_string(&terminal_ini)?;
-        let updated = content
-            .lines()
-            .map(|line| {
-                if line.starts_with("OptMode=") {
-                    "OptMode=0".to_string()
-                } else if line.starts_with("LastOptimization=") {
-                    String::new()
-                } else {
-                    line.to_string()
-                }
-            })
-            .filter(|l| !l.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        fs::write(&terminal_ini, updated)?;
         Ok(())
     }
 
     fn get_wine_prefix_dir(&self, mt5_dir: &str) -> Result<PathBuf> {
         let path = Path::new(mt5_dir);
-        // Go up two levels: .../drive_c/Program Files/MetaTrader 5 -> .../drive_c
+        // Go up three levels: .../drive_c/Program Files/MetaTrader 5 -> .../net.metaquotes.wine.metatrader5
+        // (same as backtest pipeline)
         let prefix_dir = path
             .parent()
+            .and_then(|p| p.parent())
             .and_then(|p| p.parent())
             .ok_or_else(|| anyhow!("Cannot determine Wine prefix from terminal_dir"))?;
         Ok(prefix_dir.to_path_buf())
@@ -274,6 +389,73 @@ ShutdownTerminal=1
 
         fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
         Ok(())
+    }
+
+    /// Replace a [section] in an INI string — removes old content and inserts new.
+    fn patch_ini_section(text: &str, section: &str, new_content: &str) -> String {
+        let section_header = format!("[{}]", section);
+        let mut result = String::new();
+        let mut in_section = false;
+        let mut section_found = false;
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == section_header {
+                in_section = true;
+                section_found = true;
+                continue;
+            }
+            if in_section {
+                if trimmed.starts_with('[') {
+                    in_section = false;
+                    result.push_str(new_content);
+                    if !new_content.ends_with('\n') {
+                        result.push('\n');
+                    }
+                    result.push_str(line);
+                    result.push('\n');
+                    continue;
+                }
+                continue;
+            }
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        if !section_found {
+            if !result.is_empty() && !result.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str(new_content);
+            result.push('\n');
+        } else if in_section {
+            result.push_str(new_content);
+            result.push('\n');
+        }
+
+        result
+    }
+
+    /// Remove all lines belonging to a [section] from the INI text.
+    fn strip_ini_section(text: &str, section: &str) -> String {
+        let header = format!("[{}]", section);
+        let mut result = String::new();
+        let mut skipping = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == header {
+                skipping = true;
+                continue;
+            }
+            if skipping && trimmed.starts_with('[') {
+                skipping = false;
+            }
+            if !skipping {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+        result
     }
 
     pub fn get_job_status(&self, job_id: &str) -> Result<serde_json::Value> {

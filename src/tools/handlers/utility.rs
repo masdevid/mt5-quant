@@ -2,8 +2,60 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use crate::models::Config;
 use crate::storage::ReportDb;
+
+/// OS detection and information
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+enum OsType {
+    Windows,
+    MacOS,
+    Linux,
+    Unknown,
+}
+
+impl OsType {
+    fn detect() -> Self {
+        #[cfg(target_os = "windows")]
+        return OsType::Windows;
+        #[cfg(target_os = "macos")]
+        return OsType::MacOS;
+        #[cfg(target_os = "linux")]
+        return OsType::Linux;
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        return OsType::Unknown;
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            OsType::Windows => "windows",
+            OsType::MacOS => "macos",
+            OsType::Linux => "linux",
+            OsType::Unknown => "unknown",
+        }
+    }
+
+    fn uses_wine(&self) -> bool {
+        matches!(self, OsType::MacOS | OsType::Linux)
+    }
+}
+
+/// Detect if using CrossOver instead of Wine on macOS
+fn detect_crossover(wine_exe: &str) -> bool {
+    wine_exe.contains("crossover") || wine_exe.contains("CrossOver")
+}
+
+/// Get OS context for diagnostic outputs
+fn get_os_context() -> serde_json::Value {
+    let os_type = OsType::detect();
+    json!({
+        "os": os_type.as_str(),
+        "uses_wine": os_type.uses_wine(),
+        "architecture": std::env::consts::ARCH,
+    })
+}
 
 /// Validate that `user_path` resolves to a location within `allowed_base`.
 /// Returns the canonicalized absolute path on success.
@@ -846,8 +898,11 @@ pub async fn handle_export_report(_config: &Config, args: &Value) -> Result<Valu
 
 /// Diagnose Wine installation and prefix health
 pub async fn handle_diagnose_wine(config: &Config, _args: &Value) -> Result<Value> {
+    let os_type = OsType::detect();
     let mut diagnostics = json!({
+        "os_context": get_os_context(),
         "wine_executable": null,
+        "wine_type": null,
         "wine_version": null,
         "wine_prefix": null,
         "prefix_health": null,
@@ -857,12 +912,16 @@ pub async fn handle_diagnose_wine(config: &Config, _args: &Value) -> Result<Valu
         "warnings": Vec::<String>::new(),
     });
     
-    // Check wine executable
+    // Check wine executable (macOS/Linux)
     if let Some(wine_exe) = config.wine_executable.as_ref() {
         diagnostics["wine_executable"] = json!(wine_exe);
         
-        // Get Wine version
-        let version_output = std::process::Command::new(wine_exe)
+        // Detect CrossOver vs Wine
+        let is_crossover = detect_crossover(wine_exe);
+        diagnostics["wine_type"] = json!(if is_crossover { "crossover" } else { "wine" });
+        
+        // Get Wine/CrossOver version
+        let version_output = Command::new(wine_exe)
             .arg("--version")
             .output();
         
@@ -872,14 +931,26 @@ pub async fn handle_diagnose_wine(config: &Config, _args: &Value) -> Result<Valu
                 diagnostics["wine_version"] = json!(version);
             }
             _ => {
+                let wine_type_str = if is_crossover { "CrossOver" } else { "Wine" };
                 diagnostics["errors"].as_array_mut().unwrap().push(
-                    json!("Failed to get Wine version - Wine may not be properly installed")
+                    json!(format!("Failed to get {} version - may not be properly installed", wine_type_str))
+                );
+            }
+        }
+        
+        // macOS-specific CrossOver checks
+        if matches!(os_type, OsType::MacOS) && is_crossover {
+            // Check if CrossOver app exists
+            let crossover_app = Path::new("/Applications/CrossOver.app");
+            if !crossover_app.exists() {
+                diagnostics["warnings"].as_array_mut().unwrap().push(
+                    json!("CrossOver.app not found in /Applications - may be custom installation")
                 );
             }
         }
     } else {
         diagnostics["errors"].as_array_mut().unwrap().push(
-            json!("Wine executable not configured")
+            json!("Wine/CrossOver executable not configured")
         );
     }
     
@@ -991,6 +1062,7 @@ pub async fn handle_get_mt5_logs(config: &Config, args: &Value) -> Result<Value>
     };
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "log_type": log_type,
         "log_path": log_path.to_string_lossy().to_string(),
         "found": false,
@@ -1109,6 +1181,7 @@ pub async fn handle_search_mt5_errors(config: &Config, args: &Value) -> Result<V
     }
     
     let result = json!({
+        "os_context": get_os_context(),
         "hours_searched": hours_back,
         "errors_found": errors_found.len(),
         "max_errors": max_errors,
@@ -1128,16 +1201,17 @@ pub async fn handle_search_mt5_errors(config: &Config, args: &Value) -> Result<V
 
 /// Check MT5 process status
 pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result<Value> {
-    use std::process::Command;
+    let _os_type = OsType::detect();
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "is_running": false,
         "processes": Vec::<serde_json::Value>::new(),
         "wine_server_running": false,
         "total_instances": 0,
     });
     
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         // Check for MT5 processes
         let ps_output = Command::new("ps")
@@ -1149,6 +1223,7 @@ pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result
             let mut processes = Vec::new();
             let mut mt5_count = 0;
             let mut wine_server = false;
+            let mut crossover_server = false;
             
             for line in content.lines() {
                 let line_lower = line.to_lowercase();
@@ -1169,45 +1244,11 @@ pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result
                 if line_lower.contains("wineserver") {
                     wine_server = true;
                 }
-            }
-            
-            result["processes"] = json!(processes);
-            result["is_running"] = json!(mt5_count > 0);
-            result["total_instances"] = json!(mt5_count);
-            result["wine_server_running"] = json!(wine_server);
-        }
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        let ps_output = Command::new("ps")
-            .args(["aux"])
-            .output();
-        
-        if let Ok(output) = ps_output {
-            let content = String::from_utf8_lossy(&output.stdout);
-            let mut processes = Vec::new();
-            let mut mt5_count = 0;
-            let mut wine_server = false;
-            
-            for line in content.lines() {
-                let line_lower = line.to_lowercase();
                 
-                if line_lower.contains("terminal64") || line_lower.contains("metatrader") {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 11 {
-                        processes.push(json!({
-                            "pid": parts[1],
-                            "cpu": parts[2],
-                            "mem": parts[3],
-                            "command": parts[10..].join(" "),
-                        }));
-                        mt5_count += 1;
-                    }
-                }
-                
-                if line_lower.contains("wineserver") {
-                    wine_server = true;
+                // Detect CrossOver server on macOS
+                #[cfg(target_os = "macos")]
+                if line_lower.contains("cxstart") || line_lower.contains("crossover") {
+                    crossover_server = true;
                 }
             }
             
@@ -1215,6 +1256,11 @@ pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result
             result["is_running"] = json!(mt5_count > 0);
             result["total_instances"] = json!(mt5_count);
             result["wine_server_running"] = json!(wine_server);
+            
+            #[cfg(target_os = "macos")]
+            {
+                result["crossover_server_running"] = json!(crossover_server);
+            }
         }
     }
     
@@ -1226,7 +1272,7 @@ pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result
 
 /// Kill stuck MT5 process
 pub async fn handle_kill_mt5_process(_config: &Config, args: &Value) -> Result<Value> {
-    use std::process::Command;
+    let _os_type = OsType::detect();
     
     let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
     let pid = args.get("pid").and_then(|v| v.as_str());
@@ -1271,6 +1317,12 @@ pub async fn handle_kill_mt5_process(_config: &Config, args: &Value) -> Result<V
         // Also kill wineserver if force=true
         if force {
             let _ = Command::new("killall").arg("wineserver").output();
+            
+            // On macOS, also kill CrossOver processes
+            #[cfg(target_os = "macos")]
+            {
+                let _ = Command::new("killall").arg("cxstart").output();
+            }
         }
     }
     
@@ -1281,6 +1333,7 @@ pub async fn handle_kill_mt5_process(_config: &Config, args: &Value) -> Result<V
     };
     
     let result = json!({
+        "os_context": get_os_context(),
         "killed": killed,
         "failed": failed,
         "force": force,
@@ -1295,9 +1348,10 @@ pub async fn handle_kill_mt5_process(_config: &Config, args: &Value) -> Result<V
 
 /// Check system resources for MT5
 pub async fn handle_check_system_resources(_config: &Config, _args: &Value) -> Result<Value> {
-    use std::process::Command;
+    let _os_type = OsType::detect();
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "disk_space": null,
         "memory": null,
         "cpu_cores": 0,
@@ -1345,34 +1399,66 @@ pub async fn handle_check_system_resources(_config: &Config, _args: &Value) -> R
             let vm_output = Command::new("vm_stat").output();
             if let Ok(output) = vm_output {
                 let content = String::from_utf8_lossy(&output.stdout);
-                // Parse vm_stat output
+                // Parse vm_stat output with improved robustness
                 let mut free_pages = 0u64;
                 let mut active_pages = 0u64;
                 let mut inactive_pages = 0u64;
+                let mut wired_pages = 0u64;
+                let mut page_size = 4096u64;
                 
+                // Try to get page size from vm_stat output
                 for line in content.lines() {
-                    if line.contains("Pages free:") {
-                        free_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
-                    } else if line.contains("Pages active:") {
-                        active_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
-                    } else if line.contains("Pages inactive:") {
-                        inactive_pages = line.split_whitespace().nth(2).unwrap_or("0").trim_end_matches('.').parse().unwrap_or(0);
+                    if line.contains("Mach Virtual Memory Statistics:") {
+                        // Page size is typically 4096 on macOS
+                        page_size = 4096;
                     }
                 }
                 
-                let page_size = 4096u64;
-                let total_mb = ((free_pages + active_pages + inactive_pages) * page_size) / 1024 / 1024;
+                for line in content.lines() {
+                    // More robust parsing using regex-like pattern matching
+                    if line.contains("Pages free:") {
+                        if let Some(val) = line.split(':').nth(1) {
+                            free_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                    } else if line.contains("Pages active:") {
+                        if let Some(val) = line.split(':').nth(1) {
+                            active_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                    } else if line.contains("Pages inactive:") {
+                        if let Some(val) = line.split(':').nth(1) {
+                            inactive_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                    } else if line.contains("Pages wired:") {
+                        if let Some(val) = line.split(':').nth(1) {
+                            wired_pages = val.trim().trim_end_matches('.').parse().unwrap_or(0);
+                        }
+                    }
+                }
+                
+                // Calculate memory more accurately
+                let total_pages = free_pages + active_pages + inactive_pages + wired_pages;
+                let total_mb = (total_pages * page_size) / 1024 / 1024;
                 let free_mb = (free_pages * page_size) / 1024 / 1024;
+                let available_mb = ((free_pages + inactive_pages) * page_size) / 1024 / 1024;
                 
                 result["memory"] = json!({
                     "total_mb": total_mb,
                     "free_mb": free_mb,
+                    "available_mb": available_mb,
+                    "active_mb": (active_pages * page_size) / 1024 / 1024,
+                    "wired_mb": (wired_pages * page_size) / 1024 / 1024,
+                    "page_size": page_size,
                     "unit": "MB",
                 });
                 
-                if free_mb < 2048 {
+                // Adjust memory threshold for macOS (compressed memory makes free appear lower)
+                if available_mb < 1024 {
                     result["recommendations"].as_array_mut().unwrap().push(
-                        json!("Low memory available. MT5 may crash during large optimizations.")
+                        json!(format!("Low memory available ({} MB free). MT5 may crash during large optimizations. Close other apps.", available_mb))
+                    );
+                } else if available_mb < 2048 {
+                    result["recommendations"].as_array_mut().unwrap().push(
+                        json!(format!("Memory getting low ({} MB available). Consider closing other applications.", available_mb))
                     );
                 }
             }
@@ -1393,6 +1479,13 @@ pub async fn handle_check_system_resources(_config: &Config, _args: &Value) -> R
                                 "free_mb": parts[3].parse::<u64>().unwrap_or(0),
                                 "unit": "MB",
                             });
+                            
+                            let free_mb = parts[3].parse::<u64>().unwrap_or(0);
+                            if free_mb < 1024 {
+                                result["recommendations"].as_array_mut().unwrap().push(
+                                    json!("Low memory available. MT5 may crash during large optimizations.")
+                                );
+                            }
                         }
                     }
                 }
@@ -1400,13 +1493,38 @@ pub async fn handle_check_system_resources(_config: &Config, _args: &Value) -> R
         }
         
         // Get CPU cores
-        let nproc_output = Command::new("sysctl")
-            .args(["-n", "hw.ncpu"])
-            .output();
+        #[cfg(target_os = "macos")]
+        {
+            let nproc_output = Command::new("sysctl")
+                .args(["-n", "hw.ncpu"])
+                .output();
+            
+            if let Ok(output) = nproc_output {
+                let cores = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+                result["cpu_cores"] = json!(cores);
+                
+                if cores < 4 {
+                    result["recommendations"].as_array_mut().unwrap().push(
+                        json!(format!("Low CPU core count ({} cores). Optimizations may be slow.", cores))
+                    );
+                }
+            }
+        }
         
-        if let Ok(output) = nproc_output {
-            let cores = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
-            result["cpu_cores"] = json!(cores);
+        #[cfg(target_os = "linux")]
+        {
+            let nproc_output = Command::new("nproc").output();
+            
+            if let Ok(output) = nproc_output {
+                let cores = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+                result["cpu_cores"] = json!(cores);
+                
+                if cores < 4 {
+                    result["recommendations"].as_array_mut().unwrap().push(
+                        json!(format!("Low CPU core count ({} cores). Optimizations may be slow.", cores))
+                    );
+                }
+            }
         }
     }
     
@@ -1422,6 +1540,7 @@ pub async fn handle_validate_mt5_config(config: &Config, _args: &Value) -> Resul
         .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "terminal_ini": null,
         "tester_ini": null,
         "config_files_found": Vec::<String>::new(),
@@ -1505,6 +1624,7 @@ pub async fn handle_validate_mt5_config(config: &Config, _args: &Value) -> Resul
 
 /// Get Wine prefix detailed information
 pub async fn handle_get_wine_prefix_info(config: &Config, _args: &Value) -> Result<Value> {
+    let _os_type = OsType::detect();
     let mt5_dir = config.mt5_dir()
         .ok_or_else(|| anyhow::anyhow!("MT5 directory not configured"))?;
     
@@ -1514,6 +1634,7 @@ pub async fn handle_get_wine_prefix_info(config: &Config, _args: &Value) -> Resu
         .and_then(|p| p.parent());
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "prefix_path": null,
         "exists": false,
         "windows_version": null,
@@ -1609,6 +1730,7 @@ pub async fn handle_get_backtest_crash_info(config: &Config, args: &Value) -> Re
     let hours_back = args.get("hours_back").and_then(|v| v.as_u64()).unwrap_or(6);
     
     let mut result = json!({
+        "os_context": get_os_context(),
         "crashes_found": Vec::<serde_json::Value>::new(),
         "recent_failures": 0,
         "common_patterns": Vec::<String>::new(),
