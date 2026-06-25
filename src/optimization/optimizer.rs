@@ -151,45 +151,18 @@ impl OptimizationRunner {
              ProfitInPips=0\n\
              Leverage={}\n\
              Execution=10\n\
-             Optimization=2\n\
-             Agents=10\n\
-             Visual=0\n\
+              Optimization=2\n\
+              Visual=0\n\
              Report=reports\\opt_report.htm\n\
              ReplaceReport=1\n\
              ShutdownTerminal=1",
              expert_path, params.expert, params.symbol,
             params.from_date, params.to_date, params.deposit, params.currency, params.leverage,
         );
-        let agents_section = "\
-             [Agents]\n\
-             Agent0000=11111111-1111-1111-1111-111111111111\n\
-             AgentStatus0000=3\n\
-             AgentState0000=0\n\
-             Enabled0000=1\n\
-             IP0000=127.0.0.1\n\
-             Port0000=3000\n\
-             Agent0001=22222222-2222-2222-2222-222222222222\n\
-             AgentStatus0001=3\n\
-             AgentState0001=0\n\
-             Enabled0001=1\n\
-             IP0001=127.0.0.1\n\
-             Port0001=3001\n\
-             Agent0002=33333333-3333-3333-3333-333333333333\n\
-             AgentStatus0002=3\n\
-             AgentState0002=0\n\
-             Enabled0002=1\n\
-             IP0002=127.0.0.1\n\
-             Port0002=3002\n\
-             Agent0003=44444444-4444-4444-4444-444444444444\n\
-             AgentStatus0003=3\n\
-             AgentState0003=0\n\
-             Enabled0003=1\n\
-             IP0003=127.0.0.1\n\
-             Port0003=3003";
         let updated_ini = Self::patch_ini_section(&mt5_ini_text, "Tester", &tester_section);
-        // Strip any stale [Agents] sections from previous runs, then append fresh one
+        // Strip any stale [Agents] sections from previous runs (no local agent processes)
         let cleaned = Self::strip_ini_section(&updated_ini, "Agents");
-        let final_ini = format!("{}\n{}", cleaned.trim_end(), agents_section);
+        let final_ini = cleaned.trim_end().to_string();
         let mut utf16_out: Vec<u8> = vec![0xFF, 0xFE];
         utf16_out.extend(final_ini.encode_utf16().flat_map(|c| c.to_le_bytes()));
         fs::write(&terminal_ini, utf16_out)?;
@@ -215,6 +188,7 @@ impl OptimizationRunner {
         opt_ini.push_str(&format!("ExpertParameters={}.set\n", params.expert));
         opt_ini.push_str(&format!("Symbol={}\n", params.symbol));
         opt_ini.push_str("Period=M1\n");
+        opt_ini.push_str("Model=4\n");
         opt_ini.push_str("Optimization=2\n");
         opt_ini.push_str(&format!("FromDate={}\n", params.from_date));
         opt_ini.push_str(&format!("ToDate={}\n", params.to_date));
