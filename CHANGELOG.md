@@ -9,12 +9,15 @@
 
 ### Changed
 - **Optimizer launch mechanism**: rewritten from `/mt5mcp_backtest.ini` + `.bat` to `/config:` INI + shell script. Now patches `terminal.ini` directly with full optimization parameters and appends agent configuration — no longer relies on batch file or separate INI.
+- **Removed unused local agent config**: stripped the `[Agents]` section (4 entries with UUIDs/IPs/ports) from `terminal.ini` output — no local agent processes are used.
 - **OptMode reset**: removed as a separate step; now included inline in `terminal.ini` patching during optimizer startup.
 - **Wine prefix resolution**: changed from 2-parent to 3-parent traversal, matching the backtest pipeline's Wine prefix logic.
+- **Optimizer `/config:` INI**: now includes `Model=4` and `Period=M1` in the test-configuration passed via `/config:` flag (previously hardcoded in the older INI-based approach).
 - **Set file parsing**: parameter delimiter changed from `:` to `=` (matches actual MT5 .set format); `||Y` sweep param parsing rewritten to split on `||` for accurate range extraction.
 - **OptimizationParams**: `model` parameter removed (was hardcoded to `0` everywhere anyway; MT5 now defaults correctly).
 
 ### Fixed
+- **Cargo.lock sync**: lockfile version field is now kept in sync with the release process.
 - **Set file cross-platform reading**: `.set` files are now read as UTF-16LE (with BOM) or UTF-8 regardless of platform, fixing potential encoding issues on macOS/Linux.
 - **Read-only set file overwrite**: handles pre-existing read-only files during `.set` write by removing them first.
 
