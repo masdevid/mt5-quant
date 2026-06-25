@@ -27,55 +27,20 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 **Others** typically run on Windows using the [MetaTrader5 Python package](https://pypi.org/project/MetaTrader5/), providing full terminal operations. MT5-Quant fills the gap: **organizing backtest reports, extracting deal-level insights, and managing optimization workflows** — none of which MT5 or its Python API expose natively.
 
-## Why Rust
-
-**MT5-Quant is built entirely in Rust** — one static binary, zero dependencies, instant startup.
-
-| | Rust | Python/Node |
-|---|---|---|
-| **Startup** | ~10ms | 200–500ms |
-| **Deploy** | Single binary | venv + pip/npm |
-| **Memory** | <50MB, no GC pauses | Unpredictable spikes |
-| **Safety** | Compile-time guaranteed | Runtime exceptions |
-
-**Why this matters for trading:**
-- **No garbage collection** — Process 100k+ deal rows without GC pauses during live analysis
-- **Async via Tokio** — Handle multiple tool calls concurrently (poll status while streaming logs)
-- **Cross-platform** — Same source compiles to native macOS arm64 and Linux x86_64
-- **Type-safe pipelines** — MQL5 compilation, Wine path handling, SQLite queries: all checked at compile time
-
-## Quick Install
-
-### Option 1: Pre-built Binary (Recommended)
-
-```bash
-curl -L -o mt5.tar.gz https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
-tar -xzf mt5.tar.gz
-bash scripts/setup.sh
-```
-
-### Option 2: Cargo Install (if you have Rust)
-
-```bash
-cargo install mt5-quant
-mt5-quant --help
-```
-
-Compiles from source. Takes 2–5 minutes. Requires Rust 1.70+.
-
-### Register MCP Server
-
-| Platform | Command / Config | Docs |
-|----------|------------------|------|
-| **Claude Code** | `claude mcp add mt5-quant -- $(pwd)/mt5-quant` | [Setup →](docs/QUICKSTART.md) |
-| **Windsurf** | Edit `~/.codeium/windsurf/mcp_config.json` | [WINDSURF.md →](docs/WINDSURF.md) |
-| **Cursor** | Edit `~/.cursor/mcp.json` or use Settings → MCP | [CURSOR.md →](docs/CURSOR.md) |
-| **VS Code** | Edit `.vscode/mcp.json` or run `MCP: Add Server` | [VSCODE.md →](docs/VSCODE.md) |
-| **Claude Desktop** | Agent Panel → ... → MCP Servers → Edit configuration | [CLAUDE.md →](docs/CLAUDE.md) |
-
-> **Note:** Use absolute paths like `/Users/name/mt5-quant/mt5-quant` or `$(pwd)/mt5-quant`, not relative paths like `./mt5-quant`.
-
 ## Quick Start
+
+### Install MT5-Quant
+
+Ask your LLM coding platform to install and configure MT5-Quant:
+
+> "Please install mt5-quant. It's a Rust-based MCP server for MT5 backtesting at https://github.com/masdevid/mt5-quant. Run its `scripts/setup.sh` to auto-detect Wine and MT5 paths, register the MCP server, and configure everything."
+
+The LLM will:
+1. Download the pre-built binary (or `cargo build --release`)
+2. Run `scripts/setup.sh` to auto-detect Wine/MT5 and write config
+3. Register the MCP server with your coding platform
+
+### First Backtest
 
 ```
 Run a backtest on MyEA from 2025.01.01 to 2025.03.31
@@ -83,27 +48,12 @@ Run a backtest on MyEA from 2025.01.01 to 2025.03.31
 
 The AI runs the full pipeline: compile → clean cache → backtest → extract → analyze.
 
-## Documentation
-
-| Doc | Purpose |
-|-----|---------|
-| [QUICKSTART.md](docs/QUICKSTART.md) | Complete setup for macOS/Linux |
-| [WINDSURF.md](docs/WINDSURF.md) | Windsurf IDE setup |
-| [CURSOR.md](docs/CURSOR.md) | Cursor IDE setup |
-| [VSCODE.md](docs/VSCODE.md) | VS Code setup |
-| [CLAUDE.md](docs/CLAUDE.md) | Claude Desktop setup |
-| [CONFIG.md](docs/CONFIG.md) | Configuration reference |
-| [TOOLS.md](docs/MCP_TOOLS.md) | All 89 tools documented |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and internals |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
-| [REMOTE_AGENTS.md](docs/REMOTE_AGENTS.md) | Linux optimization agents |
-
 ## MCP Tools (89)
 
 ### Core workflow
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `run_backtest` | Full pipeline: compile → clean → backtest → extract → analyze |
 | `run_backtest_quick` | Quick backtest using pre-compiled EA (skip compile) |
 | `run_backtest_only` | Backtest only - just extract raw trades, no analysis |
@@ -124,7 +74,7 @@ The AI runs the full pipeline: compile → clean cache → backtest → extract 
 ### Granular Analytics (individual analysis)
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `analyze_monthly_pnl` | Monthly P/L breakdown only |
 | `analyze_drawdown_events` | Drawdown events and causes only |
 | `analyze_top_losses` | Worst losing deals only |
@@ -139,7 +89,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Deal-Level Analytics (New)
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `list_deals` | List individual deals with filters (type, profit range, volume, dates) |
 | `search_deals_by_comment` | Full-text search in deal comments (e.g., "Layer #3") |
 | `search_deals_by_magic` | Filter deals by EA magic number |
@@ -154,7 +104,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Monitoring
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `verify_setup` | Check Wine/MT5 paths, Wine version, and EA/set file counts |
 | `get_optimization_status` | Check live state of a background optimization job |
 | `list_jobs` | All optimization jobs with compact status in one call |
@@ -162,7 +112,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Reports & logs
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `list_reports` | Compact table of all runs with key metrics — no full analysis needed |
 | `get_latest_report` | Get most recent report with optional equity chart |
 | `search_reports` | Find reports by EA, symbol, date range, or profit criteria |
@@ -181,7 +131,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### History & baseline
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `archive_report` | Convert one report dir → compact JSON entry in `backtest_history.json`, optionally delete source |
 | `archive_all_reports` | Bulk-archive all report dirs then optionally delete them; keeps N newest safe |
 | `get_history` | Query history with filters (EA, symbol, verdict, profit, DD) and sort options |
@@ -190,14 +140,14 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Cache management
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `cache_status` | MT5 tester cache size breakdown by symbol — check before cleaning |
 | `clean_cache` | Delete tester cache files; supports per-symbol and `dry_run` |
 
 ### Pre-flight & Validation
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `get_active_account` | Get current MT5 account session (login, server, available symbols) |
 | `check_symbol_data_status` | Validate symbol has sufficient history data for date range |
 | `check_mt5_status` | Check if MT5 terminal is installed and ready |
@@ -206,7 +156,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Debugging & Diagnostics (New)
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `diagnose_wine` | Check Wine installation, version, and prefix health |
 | `get_mt5_logs` | Get MT5 terminal, tester, or MetaEditor logs with filtering |
 | `search_mt5_errors` | Search logs for error patterns (crash, exception, access violation) |
@@ -222,7 +172,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Project Management
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `init_project` | Scaffold new MQL5 project with templates (scalper/swing/grid/basic) |
 | `create_set_template` | Generate .set parameter file from EA input variables |
 | `export_report` | Export backtest report to CSV, JSON, or Markdown |
@@ -230,14 +180,14 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### History & Comparison
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `get_backtest_history` | List all backtests for EA/symbol with summary metrics |
 | `compare_backtests` | Compare 2+ backtest results side-by-side with analysis |
 
 ### .set file — read / write
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `list_set_files` | All .set files in tester profiles dir with sweep stats and combination counts |
 | `read_set_file` | Parse UTF-16LE `.set` file → structured JSON params |
 | `write_set_file` | Write full params dict → UTF-16LE `.set` with `chmod 444` |
@@ -247,7 +197,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### .set file — analysis & generation
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `describe_sweep` | Swept params, value counts, and total optimization combinations |
 | `diff_set_files` | Side-by-side diff of two `.set` files — only changed params returned |
 | `set_from_optimization` | Generate a clean backtest `.set` from `get_optimization_results` params; optionally narrow sweep |
@@ -255,7 +205,7 @@ Use these for targeted analysis, or `analyze_report` to run all at once.
 ### Search & Discovery
 
 | Tool | Description |
-|------|-------------|
+|------|-----|
 | `search_experts` | Search EAs by name pattern across all directories |
 | `search_indicators` | Search indicators by name pattern |
 | `search_scripts` | Search scripts by name pattern |
@@ -266,7 +216,7 @@ Full schema: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)
 
 ## Troubleshooting
 
-Run `verify_setup` from Claude first — it checks all paths and returns actionable hints.
+Run `verify_setup` from your LLM first — it checks all paths and returns actionable hints.
 
 For crashes or unexplained failures during backtest/compile/optimization:
 - `diagnose_wine` — Check Wine installation and prefix health

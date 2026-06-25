@@ -26,6 +26,12 @@ config/backtest_history.json
 # Windsurf (local workflows, not for repo)
 .windsurf/
 
+# VS Code
+.vscode/
+
+# Codegraph
+.codegraph/
+
 # macOS
 .DS_Store
 

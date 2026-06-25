@@ -17,11 +17,16 @@ If using CrossOver, confirm bottle is named `MetaTrader5`.
 
 ### Linux
 
+Install Wine 7.0+ and confirm on PATH:
 ```bash
-sudo apt install wine64        # Debian/Ubuntu
-sudo dnf install wine          # Fedora/RHEL
-which wine64                   # confirm on PATH
+# Debian/Ubuntu
+sudo apt install wine64
+# Fedora/RHEL
+sudo dnf install wine
+which wine64
 ```
+
+Ask your LLM platform to install Wine if it's missing.
 
 ## terminal64.exe Missing
 

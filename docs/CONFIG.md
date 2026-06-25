@@ -1,18 +1,15 @@
 # Configuration Reference
 
-## Config File Location
+## Config File
 
 ```
 config/mt5-quant.yaml          # Project directory (development)
 ~/.config/mt5-quant/config/mt5-quant.yaml    # System-wide (production)
 ```
 
-Environment variable to override:
-```bash
-export MT5_MCP_HOME=/path/to/config
-```
+Override with env: `export MT5_MCP_HOME=/path/to/config`
 
-## Full Config Example
+## Full Example
 
 ```yaml
 # Required: Wine executable path
@@ -52,53 +49,9 @@ optimization:
     min_agents: 4
 ```
 
-## Platform-Specific Examples
-
-### macOS with MetaTrader 5.app
-
-```yaml
-wine_executable: "/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine64"
-terminal_dir: "~/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5"
-defaults:
-  symbol: "XAUUSDc"
-  timeframe: "M5"
-  deposit: 10000
-```
-
-### macOS with CrossOver
-
-```yaml
-wine_executable: "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine64"
-terminal_dir: "~/Library/Application Support/MetaQuotes/Terminal/<hash>/drive_c/Program Files/MetaTrader 5"
-```
-
-### Linux
-
-```yaml
-wine_executable: "/usr/bin/wine64"
-terminal_dir: "~/.wine/drive_c/Program Files/MetaTrader 5"
-display:
-  mode: headless
-  xvfb_display: ":99"
-```
-
-## Headless Mode (Linux VPS)
-
-```yaml
-display:
-  mode: headless
-  xvfb_display: ":99"
-  xvfb_screen: "1024x768x16"
-```
-
-Requires:
-```bash
-sudo apt install xvfb
-```
-
 ## Auto-Detection
 
-`setup.sh` automatically detects:
+`setup.sh` detects:
 - Wine executable (MetaTrader 5.app, CrossOver, or system Wine)
 - MT5 terminal directory
 - Architecture (Apple Silicon adds `arch -x86_64`)
