@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.33.0] — 2026-06-25
+
+### Added
+- **`src/utils/` module**: shared `read_file_as_utf8` utility for UTF-16LE BOM detection, used across set file and config handlers.
+- **OS detection and diagnostics**: `utility.rs` gains `OsType` enum, `get_os_context`, `get_system_memory`, and `crossover_server_running` helper for better CrossOver diagnostics.
+- **Wine binary detection**: MT5.app and CrossOver now detect both `wine` and `wine64` binaries; Homebrew and Linux paths add `wine` alongside `wine64`.
+
+### Changed
+- **Optimizer launch mechanism**: rewritten from `/mt5mcp_backtest.ini` + `.bat` to `/config:` INI + shell script. Now patches `terminal.ini` directly with full optimization parameters and appends agent configuration — no longer relies on batch file or separate INI.
+- **OptMode reset**: removed as a separate step; now included inline in `terminal.ini` patching during optimizer startup.
+- **Wine prefix resolution**: changed from 2-parent to 3-parent traversal, matching the backtest pipeline's Wine prefix logic.
+- **Set file parsing**: parameter delimiter changed from `:` to `=` (matches actual MT5 .set format); `||Y` sweep param parsing rewritten to split on `||` for accurate range extraction.
+- **OptimizationParams**: `model` parameter removed (was hardcoded to `0` everywhere anyway; MT5 now defaults correctly).
+
+### Fixed
+- **Set file cross-platform reading**: `.set` files are now read as UTF-16LE (with BOM) or UTF-8 regardless of platform, fixing potential encoding issues on macOS/Linux.
+- **Read-only set file overwrite**: handles pre-existing read-only files during `.set` write by removing them first.
+
+
 ## [1.32.4] — 2026-04-25
 
 ### Fixed
