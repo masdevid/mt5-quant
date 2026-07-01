@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.34.0] — 2026-07-02
+
+- docs: update changelog and tool documentation for rolling backtest
+- feat: add rolling backtest and optimization improvements
+- fix: sync Cargo.lock, remove unused Agents config from optimizer
+- fix: sync Cargo.lock version, remove unused agents config from optimizer
+
+
 ## [1.33.0] — 2026-06-25
 
 ### Added
