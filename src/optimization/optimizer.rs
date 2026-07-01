@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::models::Config;
+use crate::optimization::OptimizationParser;
 
 /// Read a file that may be UTF-16LE (with BOM) or UTF-8, returning a UTF-8 String.
 /// MT5 .set and .ini files are typically UTF-16LE with BOM (0xFF 0xFE).
@@ -36,6 +37,7 @@ pub struct OptimizationParams {
     pub deposit: u32,
     pub leverage: u32,
     pub currency: String,
+    pub max_passes: Option<u32>,
 }
 
 impl Default for OptimizationParams {
@@ -49,6 +51,7 @@ impl Default for OptimizationParams {
             deposit: 10000,
             leverage: 500,
             currency: "USD".to_string(),
+            max_passes: None,
         }
     }
 }
@@ -90,6 +93,12 @@ impl OptimizationRunner {
         if !set_path.exists() {
             return Err(anyhow!("Set file not found: {}", params.set_file));
         }
+
+        // Kill any existing MT5/agent processes to avoid stale zombies
+        for pat in &["terminal64\\.exe", "metatester64\\.exe"] {
+            let _ = Command::new("pkill").args(["-KILL", "-f", pat]).output();
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // Generate job ID and log file
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
@@ -136,13 +145,25 @@ impl OptimizationRunner {
         } else {
             format!("Experts\\{}.ex5", params.expert)
         };
-        let tester_section = format!(
+        let set_param = {
+            let base = if !params.set_file.is_empty() && params.set_file != format!("{}.set", params.expert) {
+                // Extract just the filename from the set file path
+                std::path::Path::new(&params.set_file).file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&format!("{}.set", params.expert))
+                    .to_string()
+            } else {
+                format!("{}.set", params.expert)
+            };
+            base
+        };
+        let mut tester_section = format!(
             "[Tester]\n\
              Expert={}\n\
-             ExpertParameters={}.set\n\
+             ExpertParameters={}\n\
              Symbol={}\n\
              Period=M1\n\
-             Model=4\n\
+             Model=1\n\
              FromDate={}\n\
              ToDate={}\n\
              ForwardMode=0\n\
@@ -152,13 +173,16 @@ impl OptimizationRunner {
              Leverage={}\n\
              Execution=10\n\
               Optimization=2\n\
-              Visual=0\n\
-             Report=reports\\opt_report.htm\n\
-             ReplaceReport=1\n\
-             ShutdownTerminal=1",
-             expert_path, params.expert, params.symbol,
+               Visual=0\n\
+               Report=..\\..\\mt5mcp_opt_report.htm\n\
+               ReplaceReport=1\n\
+                ShutdownTerminal=1",
+            expert_path, set_param, params.symbol,
             params.from_date, params.to_date, params.deposit, params.currency, params.leverage,
         );
+        if let Some(mp) = params.max_passes {
+            tester_section.push_str(&format!("\nMaxPass={}", mp));
+        }
         let updated_ini = Self::patch_ini_section(&mt5_ini_text, "Tester", &tester_section);
         // Strip any stale [Agents] sections from previous runs (no local agent processes)
         let cleaned = Self::strip_ini_section(&updated_ini, "Agents");
@@ -185,10 +209,10 @@ impl OptimizationRunner {
         }
         opt_ini.push_str("[Tester]\n");
         opt_ini.push_str(&format!("Expert={}.ex5\n", params.expert));
-        opt_ini.push_str(&format!("ExpertParameters={}.set\n", params.expert));
+        opt_ini.push_str(&format!("ExpertParameters={}\n", set_param));
         opt_ini.push_str(&format!("Symbol={}\n", params.symbol));
         opt_ini.push_str("Period=M1\n");
-        opt_ini.push_str("Model=4\n");
+        opt_ini.push_str("Model=1\n");
         opt_ini.push_str("Optimization=2\n");
         opt_ini.push_str(&format!("FromDate={}\n", params.from_date));
         opt_ini.push_str(&format!("ToDate={}\n", params.to_date));
@@ -199,9 +223,12 @@ impl OptimizationRunner {
         opt_ini.push_str(&format!("Leverage={}\n", params.leverage));
         opt_ini.push_str("Execution=10\n");
         opt_ini.push_str("Visual=0\n");
-        opt_ini.push_str("Report=reports\\opt_report.htm\n");
+        opt_ini.push_str("Report=..\\..\\mt5mcp_opt_report.htm\n");
         opt_ini.push_str("ReplaceReport=1\n");
         opt_ini.push_str("ShutdownTerminal=1\n");
+        if let Some(mp) = params.max_passes {
+            opt_ini.push_str(&format!("MaxPass={}\n", mp));
+        }
         fs::write(&opt_config_host, opt_ini.as_bytes())?;
 
         // Build launch script (macOS-compatible with /config: to trigger tester mode)
@@ -346,6 +373,7 @@ impl OptimizationRunner {
 
         let meta_path = jobs_dir.join(format!("{}.json", job_id));
         let started_at = Utc::now().to_rfc3339();
+        let report_path = wine_prefix.join("drive_c").join("mt5mcp_opt_report");
 
         let metadata = serde_json::json!({
             "job_id": job_id,
@@ -358,6 +386,7 @@ impl OptimizationRunner {
             "combinations": combinations,
             "log_file": log_file.to_string_lossy(),
             "wine_prefix": wine_prefix.to_string_lossy(),
+            "report_path": report_path.to_string_lossy(),
             "started_at": started_at,
         });
 
@@ -445,37 +474,51 @@ impl OptimizationRunner {
 
         let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(&meta_path)?)?;
         let pid = meta.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-
-        // Check if process is still running
         let is_running = self.is_process_running(pid);
 
-        // Check for completion marker in log
-        let log_file = meta.get("log_file").and_then(|v| v.as_str()).unwrap_or("");
-        let is_complete = if !log_file.is_empty() && Path::new(log_file).exists() {
-            fs::read_to_string(log_file)
-                .map(|content| content.contains("Optimization complete"))
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-        let status = if is_complete {
-            "completed"
-        } else if is_running {
-            "running"
-        } else {
-            "stopped"
-        };
-
-        Ok(serde_json::json!({
-            "status": status,
+        let mut result = serde_json::json!({
+            "status": if is_running { "running" } else { "stopped" },
             "job_id": job_id,
             "pid": pid,
             "expert": meta.get("expert"),
             "symbol": meta.get("symbol"),
+            "from_date": meta.get("from_date"),
+            "to_date": meta.get("to_date"),
             "started_at": meta.get("started_at"),
-            "log_file": log_file,
-        }))
+        });
+
+        // If not running, try to parse the optimization report
+        if !is_running {
+            let parser = OptimizationParser::new();
+            match parser.parse_job(job_id) {
+                Ok(passes) if !passes.is_empty() => {
+                    let mut sorted_by_pf = passes.clone();
+                    sorted_by_pf.sort_by(|a, b| b.profit_factor.partial_cmp(&a.profit_factor).unwrap());
+                    let top10: Vec<_> = sorted_by_pf.into_iter().take(10).collect();
+
+                    let best_pf = parser.find_best_pass(&passes, "profit_factor");
+                    let best_profit = parser.find_best_pass(&passes, "profit");
+
+                    let m = result.as_object_mut()
+                        .ok_or_else(|| anyhow!("result is not object"))?;
+                    m.insert("status".into(), serde_json::Value::String("completed".into()));
+                    m.insert("total_passes".into(), serde_json::json!(passes.len()));
+                    m.insert("top_10".into(), serde_json::to_value(&top10).unwrap_or_default());
+                    m.insert("best_pf".into(), serde_json::to_value(best_pf).unwrap_or_default());
+                    m.insert("best_profit".into(), serde_json::to_value(best_profit).unwrap_or_default());
+                }
+                _ => {
+                    let m = result.as_object_mut()
+                        .ok_or_else(|| anyhow!("result is not object"))?;
+                    m.insert("status".into(), serde_json::Value::String("stopped".into()));
+                    m.insert("message".into(), serde_json::Value::String(
+                        "Optimization stopped but no report found — may have crashed or was killed early".into()
+                    ));
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     fn is_process_running(&self, pid: u32) -> bool {

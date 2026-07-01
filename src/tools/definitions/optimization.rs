@@ -13,7 +13,8 @@ pub fn tool_run_optimization() -> Value {
                 "symbol": { "type": "string", "description": "Trading symbol (default: XAUUSD)" },
                 "from_date": { "type": "string", "description": "Start date YYYY.MM.DD" },
                 "to_date": { "type": "string", "description": "End date YYYY.MM.DD" },
-                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" }
+                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" },
+                "max_passes": { "type": "integer", "description": "Cap on genetic optimization passes (MT5 default: ~10496 for 10 params). Use e.g. 5000 to run ~50% fewer passes." }
             }
         }
     })

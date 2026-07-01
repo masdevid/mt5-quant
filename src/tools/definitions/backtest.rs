@@ -147,6 +147,34 @@ pub fn tool_cache_status() -> Value {
     })
 }
 
+pub fn tool_run_rolling_backtest() -> Value {
+    json!({
+        "name": "run_rolling_backtest",
+        "description": "Rolling backtest: run N consecutive weekly backtests sequentially and return aggregated results. Compiles once, then each week runs with skip_compile. Use this to test EA stability across multiple weeks.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["expert"],
+            "properties": {
+                "expert": { "type": "string", "description": "EA name without path or extension" },
+                "symbol": { "type": "string", "description": "Trading symbol (default: from config or first available)" },
+                "from_date": { "type": "string", "description": "Start date YYYY.MM.DD (default: auto-calculate N weeks back)" },
+                "to_date": { "type": "string", "description": "End date YYYY.MM.DD (default: auto-calculate to last Sunday)" },
+                "timeframe": { "type": "string", "enum": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"], "description": "Chart timeframe (default: M5)" },
+                "deposit": { "type": "integer", "description": "Initial deposit (default: 10000)" },
+                "model": { "type": "integer", "enum": [0, 1, 2], "description": "Tick model: 0=Every tick, 1=OHLC, 2=Open prices" },
+                "set_file": { "type": "string", "description": "Path to .set parameter file for EA inputs" },
+                "weeks": { "type": "integer", "description": "Number of weekly backtests to run (default: 4)" },
+                "skip_compile": { "type": "boolean", "description": "Skip initial compilation (default: false — compiles on first week)" },
+                "shutdown": { "type": "boolean", "description": "Close MT5 after backtest completes (default: true)" },
+                "kill_existing": { "type": "boolean", "description": "Kill any running MT5 instance first (default: true)" },
+                "timeout": { "type": "integer", "description": "Max wait time per week in seconds (default: 900)" },
+                "gui": { "type": "boolean", "description": "Enable MT5 visualization window" },
+                "startup_delay_secs": { "type": "integer", "description": "Seconds to wait for MT5 initialization (default: 10)" }
+            }
+        }
+    })
+}
+
 pub fn tool_clean_cache() -> Value {
     json!({
         "name": "clean_cache",

@@ -31,6 +31,23 @@ impl OptimizationParser {
         }
 
         let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(&meta_path)?)?;
+
+        // Check if report_path is stored in metadata
+        if let Some(report_base) = meta.get("report_path").and_then(|v| v.as_str()) {
+            let base_path = Path::new(report_base);
+            for ext in &[".htm", ".htm.xml", ".html"] {
+                let candidate = base_path.with_extension(ext.trim_start_matches('.'));
+                if candidate.exists() {
+                    return self.parse_file(&candidate);
+                }
+            }
+            return Err(anyhow!(
+                "Optimization report not found at {}.*. Is MT5 optimization still running?",
+                base_path.display()
+            ));
+        }
+
+        // Fallback: derive from wine_prefix (legacy)
         let wine_prefix = meta.get("wine_prefix")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("wine_prefix not in job metadata"))?;
@@ -169,13 +186,13 @@ impl OptimizationParser {
         
         // Find all rows in Worksheet/Table
         for node in doc.descendants() {
-            if node.has_tag_name(("http://schemas.microsoft.com/office/excel/2003/xml", "Row")) || 
+            if node.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Row")) || 
                node.has_tag_name("Row") {
                 let cells: Vec<String> = node.children()
                     .filter(|n: &roxmltree::Node<'_, '_>| {
-                        n.has_tag_name(("http://schemas.microsoft.com/office/excel/2003/xml", "Cell")) ||
+                        n.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Cell")) ||
                         n.has_tag_name("Cell") ||
-                        n.has_tag_name(("http://schemas.microsoft.com/office/excel/2003/xml", "Data")) ||
+                        n.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Data")) ||
                         n.has_tag_name("Data")
                     })
                     .map(|n| n.text().unwrap_or("").trim().to_string().replace(',', ""))

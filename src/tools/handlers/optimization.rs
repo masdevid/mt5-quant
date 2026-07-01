@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::fs;
+use std::path::Path;
 use crate::models::Config;
 use crate::optimization::{OptimizationParams, OptimizationParser, OptimizationRunner};
 
@@ -29,6 +31,7 @@ pub async fn handle_run_optimization(config: &Config, args: &Value) -> Result<Va
         deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
         leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
         currency: args.get("currency").and_then(|v| v.as_str()).unwrap_or("USD").to_string(),
+        max_passes: args.get("max_passes").and_then(|v| v.as_u64()).map(|v| v as u32),
     };
 
     let runner = OptimizationRunner::new(config.clone());
@@ -55,6 +58,30 @@ pub async fn handle_get_optimization_status(config: &Config, args: &Value) -> Re
     let runner = OptimizationRunner::new(config.clone());
     let status = runner.get_job_status(job_id)?;
 
+    // Store completion results back to metadata for persistence
+    if status.get("status").and_then(|v| v.as_str()) == Some("completed") {
+        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let meta_path = jobs_dir.join(format!("{}.json", job_id));
+        if let Ok(meta_str) = fs::read_to_string(&meta_path) {
+            if let Ok(mut meta) = serde_json::from_str::<serde_json::Value>(&meta_str) {
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.insert("status".into(), serde_json::Value::String("completed".into()));
+                    obj.insert("completed_at".into(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+                    if let Some(top) = status.get("top_10") {
+                        obj.insert("top_10".into(), top.clone());
+                    }
+                    if let Some(best) = status.get("best_pf") {
+                        obj.insert("best_pf".into(), best.clone());
+                    }
+                    if let Some(total) = status.get("total_passes") {
+                        obj.insert("total_passes".into(), total.clone());
+                    }
+                    let _ = fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
+                }
+            }
+        }
+    }
+
     Ok(json!({
         "content": [{ "type": "text", "text": status.to_string() }],
         "isError": false
@@ -65,7 +92,7 @@ pub async fn handle_get_optimization_results(_config: &Config, args: &Value) -> 
     let job_id = args.get("job_id")
         .and_then(|v| v.as_str());
 
-    let file = args.get("file")
+    let file = args.get("report_file")
         .and_then(|v| v.as_str());
 
     let parser = OptimizationParser::new();
@@ -79,7 +106,7 @@ pub async fn handle_get_optimization_results(_config: &Config, args: &Value) -> 
     };
 
     let sort_by = args.get("sort").and_then(|v| v.as_str()).unwrap_or("profit");
-    let top_n = args.get("top").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
 
     let best = parser.find_best_pass(&passes, sort_by);
 

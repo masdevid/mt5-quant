@@ -75,6 +75,7 @@ impl ToolHandler {
             "launch_backtest" => backtest::handle_launch_backtest(self, args).await,     // Fire-and-forget mode
             "get_backtest_status" => backtest::handle_get_backtest_status(&self.config, args).await,
             "get_tester_log"      => backtest::handle_get_tester_log(&self.config, args).await,
+            "run_rolling_backtest" => backtest::handle_run_rolling_backtest(&self.config, args).await,
             "cache_status" => backtest::handle_cache_status(&self.config).await,
             "clean_cache" => backtest::handle_clean_cache(&self.config, args).await,
             
