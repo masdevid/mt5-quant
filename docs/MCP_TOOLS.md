@@ -2,7 +2,7 @@
 
 Full input/output schemas for MT5-Quant tools.
 
-> **Documentation Status:** All 89 tools are documented.
+> **Documentation Status:** All 90 tools are documented.
 
 ---
 
@@ -219,6 +219,137 @@ Fire-and-forget mode: compile → clean → launch MT5 backtest, return immediat
 
 ---
 
+## `run_rolling_backtest`
+
+Run N consecutive weekly backtests sequentially and return aggregated results. Compiles once, then each week runs with `skip_compile`. Kills and restarts MT5 between weeks for a clean state.
+
+**When to call:** When you want to test EA stability across multiple weeks to detect performance degradation, regime change sensitivity, or parameter drift.
+
+### Input schema
+
+```typescript
+{
+  // Required
+  expert: string;              // EA name without path or extension
+
+  // Date range — specify both or omit for auto-calculation (N weeks back to last Sunday)
+  from_date?: string;          // "YYYY.MM.DD" (default: auto-calculate N weeks back)
+  to_date?: string;            // "YYYY.MM.DD" (default: auto-calculate to last Sunday)
+
+  // Optional overrides
+  symbol?: string;             // Trading symbol (default: from config or first available)
+  timeframe?: "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1"; // Default: M5
+  deposit?: number;            // Initial deposit (default: 10000)
+  model?: 0 | 1 | 2;          // Tick model: 0=Every tick, 1=OHLC, 2=Open prices
+  set_file?: string;           // Path to .set parameter file for EA inputs
+
+  // Rolling options
+  weeks?: number;              // Number of weekly backtests to run (default: 4, max: 52)
+
+  // Pipeline flags
+  skip_compile?: boolean;      // Skip initial compilation (default: false — compiles on first week)
+  shutdown?: boolean;          // Close MT5 after backtest completes (default: true)
+  kill_existing?: boolean;     // Kill any running MT5 instance first (default: true)
+  timeout?: number;            // Max wait time per week in seconds (default: 900)
+  gui?: boolean;               // Enable MT5 visualization window (default: false)
+  startup_delay_secs?: number; // Seconds to wait for MT5 initialization (default: 10)
+}
+```
+
+### Output schema
+
+```typescript
+{
+  success: true;
+  message: string;             // "Rolling backtest launched with N weeks. Use get_backtest_status to poll for completion."
+  report_id: string;           // "ROLLING_MyEA_2026.06.24_2026.07.01"
+  report_dir: string;          // Full path to report directory
+  expert: string;
+  weeks: Array<{
+    label: string;             // "Week 1", "Week 2", etc.
+    from_date: string;         // "2026.06.24"
+    to_date: string;           // "2026.06.30"
+  }>;
+  poll_hint: string;           // "Call get_backtest_status with report_dir to check progress"
+}
+```
+
+### Status polling
+
+After launch, poll with `get_backtest_status(report_dir=<dir>)` to track progress. The rolling backtest runs all weeks in a background task — each week is a full backtest pipeline (clean → launch → poll → extract → analyze).
+
+Once complete, the report directory contains:
+- `rolling_results.json` — full summary with per-week metrics and totals
+- `progress.log` — current week being processed
+- `weeks.json` — the weekly schedule
+
+### Example
+
+```json
+// Input
+{
+  "expert": "MyEA",
+  "symbol": "XAUUSD",
+  "weeks": 4,
+  "deposit": 10000
+}
+
+// Output
+{
+  "success": true,
+  "message": "Rolling backtest launched with 4 weeks. Use get_backtest_status to poll for completion.",
+  "report_id": "ROLLING_MyEA_2026.06.03_2026.07.01",
+  "report_dir": "reports/ROLLING_MyEA_2026.06.03_2026.07.01",
+  "expert": "MyEA",
+  "weeks": [
+    { "label": "Jun 03 - Jun 07", "from_date": "2026.06.03", "to_date": "2026.06.07" },
+    { "label": "Jun 10 - Jun 14", "from_date": "2026.06.10", "to_date": "2026.06.14" },
+    { "label": "Jun 17 - Jun 21", "from_date": "2026.06.17", "to_date": "2026.06.21" },
+    { "label": "Jun 24 - Jun 28", "from_date": "2026.06.24", "to_date": "2026.06.28" }
+  ]
+}
+```
+
+### Rolling results format (rolling_results.json)
+
+```json
+{
+  "success": true,
+  "weeks_run": 4,
+  "summary": {
+    "total_net_profit": 12450.50,
+    "max_drawdown_pct": 8.5,
+    "total_trades": 342
+  },
+  "weekly_results": [
+    {
+      "label": "Jun 03 - Jun 07",
+      "from_date": "2026.06.03",
+      "to_date": "2026.06.07",
+      "success": true,
+      "net_profit": 3200.00,
+      "max_dd_pct": 3.2,
+      "total_trades": 85,
+      "profit_factor": 1.45,
+      "report_dir": "reports/20260701_120000_MyEA_XAUUSD_M5"
+    },
+    {
+      "label": "Jun 10 - Jun 14",
+      "from_date": "2026.06.10",
+      "to_date": "2026.06.14",
+      "success": true,
+      "net_profit": -450.00,
+      "max_dd_pct": 8.5,
+      "total_trades": 92,
+      "profit_factor": 0.92,
+      "report_dir": "reports/20260701_123000_MyEA_XAUUSD_M5"
+    }
+  ]
+}
+```
+
+---
+
 ## `get_backtest_status`
 
 Check progress of a running backtest pipeline launched via `launch_backtest`.
@@ -267,7 +398,7 @@ Launch genetic parameter optimization as a detached background process.
 
 **Important:** This tool returns immediately. MT5 runs for 2-6 hours. The AI agent must NOT poll for results — the user monitors MT5 and signals when done. Call `get_optimization_results` only after user confirmation.
 
-**Always uses model 0.** Model 1 (1-min OHLC) overfits grid/martingale EAs because intra-bar price movement is not simulated. Parameters that look optimal on model 1 fail on model 0 verification — this is a known trap.
+**Uses Model=1 (1-min OHLC) for faster optimization.** Use a separate `run_backtest` with `model=0` to verify top optimization results — Model 1 optimization parameters may overfit grid/martingale EAs because intra-bar price movement is not simulated. The `get_optimization_status` tool now auto-parses results when optimization completes, returning top passes, best PF, and best profit.
 
 ### Input schema
 
@@ -279,6 +410,7 @@ Launch genetic parameter optimization as a detached background process.
   to: string;              // "YYYY-MM-DD"
   symbol?: string;         // Default from config
   deposit?: number;        // Default from config
+  max_passes?: number;     // Cap on genetic optimization passes (e.g. 5000 to run fewer)
   currency?: string;       // Default: "USD"
   leverage?: number;       // Default: 500
   log_file?: string;       // Where to write nohup output (default: /tmp/opt_<timestamp>.log)
@@ -449,14 +581,19 @@ Check the live state of a background optimization job (started by `run_optimizat
 ```typescript
 {
   success: boolean;
+  status: "running" | "stopped" | "completed";
   job_id: string;
-  alive: boolean;        // True if the optimization process is still running
   pid: number;
-  started_at: string;    // ISO timestamp
-  elapsed_seconds: number;
-  report_found: boolean; // True if MT5 has written the result file
-  report_path: string | null;
-  log_tail: string[];    // Last 10 lines of the nohup log
+  expert?: string;
+  symbol?: string;
+  from_date?: string;
+  to_date?: string;
+  started_at?: string;
+  // Present when status is "completed":
+  total_passes?: number;
+  top_10?: Array<{ pass: number; profit: number; profit_factor: number; drawdown_pct: number; }>;
+  best_pf?: { /* best pass by profit factor */ };
+  best_profit?: { /* best pass by profit */ };
 }
 ```
 

@@ -41,4 +41,4 @@ The AI runs: compile → clean → backtest → extract → analyze.
 
 ---
 
-**Next:** See [TOOLS.md](docs/MCP_TOOLS.md) for all 89 tools.
+**Next:** See [TOOLS.md](docs/MCP_TOOLS.md) for all 90 tools.
