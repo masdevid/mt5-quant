@@ -237,7 +237,7 @@ pub async fn handle_tail_log(_config: &Config, args: &Value) -> Result<Value> {
     let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
     let log_path = if let Some(jid) = job_id {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
         let meta_path = jobs_dir.join(format!("{}.json", jid));
         let meta: Value = serde_json::from_str(&fs::read_to_string(meta_path)?)?;
         meta.get("log_file").and_then(|v| v.as_str()).map(|s| s.to_string())

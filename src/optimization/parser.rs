@@ -23,7 +23,7 @@ impl OptimizationParser {
     }
 
     pub fn parse_job(&self, job_id: &str) -> Result<Vec<OptimizationPass>> {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
         let meta_path = jobs_dir.join(format!("{}.json", job_id));
 
         if !meta_path.exists() {
@@ -188,14 +188,13 @@ impl OptimizationParser {
         for node in doc.descendants() {
             if node.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Row")) || 
                node.has_tag_name("Row") {
-                let cells: Vec<String> = node.children()
+                let cells: Vec<String> = node.descendants()
                     .filter(|n: &roxmltree::Node<'_, '_>| {
-                        n.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Cell")) ||
-                        n.has_tag_name("Cell") ||
                         n.has_tag_name(("urn:schemas-microsoft-com:office:spreadsheet", "Data")) ||
                         n.has_tag_name("Data")
                     })
-                    .map(|n| n.text().unwrap_or("").trim().to_string().replace(',', ""))
+                    .filter_map(|n| n.text())
+                    .map(|t| t.trim().to_string().replace(',', ""))
                     .collect();
                 
                 if cells.is_empty() {

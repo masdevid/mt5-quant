@@ -94,6 +94,7 @@ pub struct Config {
     pub backtest_timeout: Option<u32>,
     pub opt_log_dir: Option<String>,
     pub opt_min_agents: Option<u32>,
+    pub opt_max_agents: Option<u32>,
     pub reports_dir: Option<String>,
     pub backtest_login: Option<String>,
     pub backtest_server: Option<String>,
@@ -121,6 +122,7 @@ impl Default for Config {
             backtest_timeout: None,
             opt_log_dir: None,
             opt_min_agents: None,
+            opt_max_agents: None,
             reports_dir: None,
             backtest_login: None,
             backtest_server: None,
@@ -241,6 +243,7 @@ impl Config {
         cfg.backtest_timeout  = Some(900);
         cfg.opt_log_dir       = Some("/tmp".into());
         cfg.opt_min_agents    = Some(1);
+        cfg.opt_max_agents    = Some(20);
 
         cfg
     }
@@ -339,7 +342,8 @@ impl Config {
              backtest_timeout: {to}\n\
              \n\
              opt_log_dir: {opt_log}\n\
-             opt_min_agents: {opt_agents}\n",
+             opt_min_agents: {opt_agents}\n\
+             opt_max_agents: {max_agents}\n",
             wine      = s(&self.wine_executable),
             term      = s(&self.terminal_dir),
             exp       = s(&self.experts_dir),
@@ -357,6 +361,7 @@ impl Config {
             to        = u(self.backtest_timeout),
             opt_log   = s(&self.opt_log_dir),
             opt_agents = u(self.opt_min_agents),
+            max_agents = u(self.opt_max_agents),
         );
 
         fs::write(&path, content)?;
@@ -405,6 +410,7 @@ impl Config {
             backtest_timeout:     map.get("backtest_timeout").and_then(|s| s.parse().ok()),
             opt_log_dir:          map.get("opt_log_dir").cloned(),
             opt_min_agents:       map.get("opt_min_agents").and_then(|s| s.parse().ok()),
+            opt_max_agents:       map.get("opt_max_agents").and_then(|s| s.parse().ok()),
             reports_dir:          map.get("reports_dir").cloned(),
             backtest_login:       map.get("backtest_login").cloned(),
             backtest_server:      map.get("backtest_server").cloned(),
@@ -432,6 +438,7 @@ impl Config {
             "backtest_timeout"   => self.backtest_timeout.unwrap_or(900).to_string(),
             "opt_log_dir"        => self.opt_log_dir.clone().unwrap_or_else(|| "/tmp".to_string()),
             "opt_min_agents"     => self.opt_min_agents.unwrap_or(1).to_string(),
+            "opt_max_agents"     => self.opt_max_agents.unwrap_or(0).to_string(),
             "reports_dir"        => self.reports_dir.clone().unwrap_or_else(|| "reports".to_string()),
             "backtest_login"     => self.backtest_login.clone().unwrap_or_default(),
             "backtest_server"    => self.backtest_server.clone().unwrap_or_default(),

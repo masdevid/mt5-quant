@@ -60,7 +60,7 @@ pub async fn handle_get_optimization_status(config: &Config, args: &Value) -> Re
 
     // Store completion results back to metadata for persistence
     if status.get("status").and_then(|v| v.as_str()) == Some("completed") {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
         let meta_path = jobs_dir.join(format!("{}.json", job_id));
         if let Ok(meta_str) = fs::read_to_string(&meta_path) {
             if let Ok(mut meta) = serde_json::from_str::<serde_json::Value>(&meta_str) {

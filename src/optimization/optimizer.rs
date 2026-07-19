@@ -105,6 +105,11 @@ impl OptimizationRunner {
         let job_id = format!("opt_{}", timestamp);
         let log_file = PathBuf::from(format!("/tmp/mt5opt_{}.log", timestamp));
 
+        // Calculate agent count: 75% of available CPUs, or configured value
+        let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let default_agents = ((cpu_count as f64 * 0.75).ceil() as u32).max(1);
+        let max_agents = self.config.opt_max_agents.unwrap_or(default_agents).max(1);
+
         // Count combinations
         let combinations = self.count_combinations(&params.set_file)
             .map_err(|e| anyhow!("count_combinations failed: {}", e))?;
@@ -115,11 +120,22 @@ impl OptimizationRunner {
         let wine_exe = self.config.wine_executable.as_ref()
             .ok_or_else(|| anyhow!("wine_executable not configured"))?;
         
+        // Resolve the .set filename MT5 will actually load: basename of set_file,
+        // else "{expert}.set". Must match the name told to MT5 below (ExpertParameters).
+        let set_param = if !params.set_file.is_empty() && params.set_file != format!("{}.set", params.expert) {
+            std::path::Path::new(&params.set_file).file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&format!("{}.set", params.expert))
+                .to_string()
+        } else {
+            format!("{}.set", params.expert)
+        };
+
         // Write .set file as UTF-16LE with BOM directly to MT5 tester directory
         let wine_prefix_dir = self.get_wine_prefix_dir(mt5_dir)?;
         let tester_dir = wine_prefix_dir.join("drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester");
         fs::create_dir_all(&tester_dir).map_err(|e| anyhow!("create_dir_all({}) failed: {}", tester_dir.display(), e))?;
-        let dst_set_file = tester_dir.join(format!("{}.set", params.expert));
+        let dst_set_file = tester_dir.join(&set_param);
         self.write_utf16le_set(&params.set_file, &dst_set_file)
             .map_err(|e| anyhow!("write_utf16le_set({}) failed: {}", dst_set_file.display(), e))?;
 
@@ -145,24 +161,13 @@ impl OptimizationRunner {
         } else {
             format!("Experts\\{}.ex5", params.expert)
         };
-        let set_param = {
-            let base = if !params.set_file.is_empty() && params.set_file != format!("{}.set", params.expert) {
-                // Extract just the filename from the set file path
-                std::path::Path::new(&params.set_file).file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&format!("{}.set", params.expert))
-                    .to_string()
-            } else {
-                format!("{}.set", params.expert)
-            };
-            base
-        };
         let mut tester_section = format!(
             "[Tester]\n\
              Expert={}\n\
              ExpertParameters={}\n\
              Symbol={}\n\
              Period=M1\n\
+             LocalAgents={}\n\
              Model=1\n\
              FromDate={}\n\
              ToDate={}\n\
@@ -177,7 +182,7 @@ impl OptimizationRunner {
                Report=..\\..\\mt5mcp_opt_report.htm\n\
                ReplaceReport=1\n\
                 ShutdownTerminal=1",
-            expert_path, set_param, params.symbol,
+            expert_path, set_param, params.symbol, max_agents,
             params.from_date, params.to_date, params.deposit, params.currency, params.leverage,
         );
         if let Some(mp) = params.max_passes {
@@ -211,8 +216,9 @@ impl OptimizationRunner {
         opt_ini.push_str(&format!("Expert={}.ex5\n", params.expert));
         opt_ini.push_str(&format!("ExpertParameters={}\n", set_param));
         opt_ini.push_str(&format!("Symbol={}\n", params.symbol));
-        opt_ini.push_str("Period=M1\n");
-        opt_ini.push_str("Model=1\n");
+        opt_ini.push_str(&format!("Period={}\n", "M1"));
+        opt_ini.push_str(&format!("LocalAgents={}\n", max_agents));
+        opt_ini.push_str(&format!("Model={}\n", "0"));
         opt_ini.push_str("Optimization=2\n");
         opt_ini.push_str(&format!("FromDate={}\n", params.from_date));
         opt_ini.push_str(&format!("ToDate={}\n", params.to_date));
@@ -249,12 +255,13 @@ impl OptimizationRunner {
              export DYLD_FALLBACK_LIBRARY_PATH='{dyld}'\n\
              export WINEPREFIX='{prefix}'\n\
              export WINEDEBUG='-all'\n\
-             nohup '{wine}' '{terminal}' '/config:{config}' >/dev/null 2>&1 &\n",
+             nohup taskset -c 0-$(( {max_agents} - 1 )) '{wine}' '{terminal}' '/config:{config}' >/dev/null 2>&1 &\n",
             dyld     = dyld,
             prefix   = wine_prefix_dir.display(),
             wine     = wine_exe,
             terminal = terminal_host.display(),
             config   = opt_config_win,
+            max_agents = max_agents,
         );
 
         let script_path = std::env::temp_dir().join("mt5opt_launch.sh");
@@ -368,8 +375,8 @@ impl OptimizationRunner {
         combinations: u64,
         wine_prefix: &Path,
     ) -> Result<()> {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
-        fs::create_dir_all(jobs_dir)?;
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
+        fs::create_dir_all(&jobs_dir)?;
 
         let meta_path = jobs_dir.join(format!("{}.json", job_id));
         let started_at = Utc::now().to_rfc3339();
@@ -462,7 +469,7 @@ impl OptimizationRunner {
     }
 
     pub fn get_job_status(&self, job_id: &str) -> Result<serde_json::Value> {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
         let meta_path = jobs_dir.join(format!("{}.json", job_id));
 
         if !meta_path.exists() {
@@ -538,7 +545,7 @@ impl OptimizationRunner {
     }
 
     pub fn list_jobs(&self) -> Result<Vec<serde_json::Value>> {
-        let jobs_dir = Path::new(".mt5mcp_jobs");
+        let jobs_dir = std::env::temp_dir().join(".mt5mcp_jobs");
         let mut jobs = Vec::new();
 
         if jobs_dir.exists() {
