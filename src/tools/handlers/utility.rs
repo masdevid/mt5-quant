@@ -1223,6 +1223,7 @@ pub async fn handle_check_mt5_process(_config: &Config, _args: &Value) -> Result
             let mut processes = Vec::new();
             let mut mt5_count = 0;
             let mut wine_server = false;
+            #[cfg(target_os = "macos")]
             let mut crossover_server = false;
             
             for line in content.lines() {
