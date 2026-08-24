@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.34.2] — 2026-08-25
+
+- ci(release): publish to crates.io via trusted publishing (OIDC)
+- fix: resolve clippy lints surfaced by newer toolchain in CI gate
+- fix(release): update server.json via auto-merged PR to satisfy branch ruleset
+- chore(templates): link Discussions from issue chooser
+- chore(templates): add issue forms and PR template
+- ci(security): add OpenSSF Scorecard analysis and badge
+- ci(hardening): least-privilege GITHUB_TOKEN permissions across workflows
+- ci(security): add cargo-deny checks for advisories, licenses, bans, sources
+- ci(security): add dependency review on PRs
+- docs(security): add security policy
+- fix(ci): activate Dependabot for cargo and github-actions ecosystems
+
+
 ## [1.34.1] — 2026-08-25
 
 - fix: remove PayPal funding link, bump anyhow for RUSTSEC-2026-0190, resolve all clippy warnings
