@@ -296,7 +296,14 @@ jobs:
             echo "server.json unchanged — no commit needed"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "ci: update server.json SHA256 for v${VERSION} [skip ci]"
+            # Never add a CI-skip marker to this commit message: under the
+            # protect-master ruleset the server.json PR carries required
+            # status checks, and a CI-skip marker suppresses
+            # pull_request-triggered workflows, so those checks never report
+            # and auto-merge hangs until timeout. Omitting it is safe —
+            # release.yml triggers only on tags (no loop risk) and
+            # GITHUB_TOKEN-attributed merges never retrigger workflows.
+            git commit -m "ci: update server.json SHA256 for v${VERSION}"
             git push origin "$BRANCH"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Committed server.json update to ${BRANCH}"
@@ -306,8 +313,11 @@ jobs:
         if: steps.commit.outputs.changed == 'true'
         run: |
           BRANCH="ci/server-json-sha-${VERSION}"
+          # Same rule as above: no CI-skip marker in the title — GitHub
+          # honors markers on PR titles too, which would suppress the
+          # required checks.
           GH_TOKEN="${{ github.token }}" gh pr create \
-            --title "ci: update server.json SHA256 for v${VERSION} [skip ci]" \
+            --title "ci: update server.json SHA256 for v${VERSION}" \
             --body "Automated MCP package hash update." \
             --base master \
             --head "$BRANCH"
