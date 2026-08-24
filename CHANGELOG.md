@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.1] — 2026-08-25
+
+- fix: remove PayPal funding link, bump anyhow for RUSTSEC-2026-0190, resolve all clippy warnings
+- fix: remove unused crossover_server + Path import warnings
+- feat: configurable local agents + CPU pinning for optimization
+
+
 ## [1.34.0] — 2026-07-02
 
 - docs: update changelog and tool documentation for rolling backtest
