@@ -78,12 +78,12 @@ pub fn tool_search_indicators() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "pattern": { 
-                    "type": "string", 
-                    "description": "Search pattern (case-insensitive substring match)" 
+                "pattern": {
+                    "type": "string",
+                    "description": "Search pattern (case-insensitive substring match)"
                 },
-                "include_builtin": { 
-                    "type": "boolean", 
+                "include_builtin": {
+                    "type": "boolean",
                     "description": "Include built-in MT5 indicators in search",
                     "default": false
                 }
@@ -100,9 +100,9 @@ pub fn tool_search_scripts() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "pattern": { 
-                    "type": "string", 
-                    "description": "Search pattern (case-insensitive substring match)" 
+                "pattern": {
+                    "type": "string",
+                    "description": "Search pattern (case-insensitive substring match)"
                 }
             },
             "required": ["pattern"]
@@ -117,13 +117,13 @@ pub fn tool_copy_indicator_to_project() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "source_path": { 
-                    "type": "string", 
-                    "description": "Full source path to the indicator file (.mq5 or .ex5)" 
+                "source_path": {
+                    "type": "string",
+                    "description": "Full source path to the indicator file (.mq5 or .ex5)"
                 },
-                "target_name": { 
-                    "type": "string", 
-                    "description": "Optional: Rename the file (without extension). If not provided, uses original name" 
+                "target_name": {
+                    "type": "string",
+                    "description": "Optional: Rename the file (without extension). If not provided, uses original name"
                 }
             },
             "required": ["source_path"]
@@ -138,13 +138,13 @@ pub fn tool_copy_script_to_project() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "source_path": { 
-                    "type": "string", 
-                    "description": "Full source path to the script file (.mq5 or .ex5)" 
+                "source_path": {
+                    "type": "string",
+                    "description": "Full source path to the script file (.mq5 or .ex5)"
                 },
-                "target_name": { 
-                    "type": "string", 
-                    "description": "Optional: Rename the file (without extension). If not provided, uses original name" 
+                "target_name": {
+                    "type": "string",
+                    "description": "Optional: Rename the file (without extension). If not provided, uses original name"
                 }
             },
             "required": ["source_path"]

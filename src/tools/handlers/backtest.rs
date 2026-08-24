@@ -1,3 +1,6 @@
+use crate::models::report::BacktestJob;
+use crate::models::Config;
+use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 use anyhow::Result;
 use chrono::Datelike;
 use serde_json::{json, Value};
@@ -5,9 +8,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::time::Duration;
-use crate::models::Config;
-use crate::models::report::BacktestJob;
-use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 
 /// Pre-flight check result for backtest readiness
 #[derive(Debug)]
@@ -23,16 +23,18 @@ impl BacktestPreflight {
         let account = config.current_account();
         let server = account.as_ref().map(|a| a.server.clone());
         let available_symbols = config.discover_symbols_for_active_account();
-        
+
         let ea_exists = if let Some(experts_dir) = &config.experts_dir {
             let mq5_path = std::path::Path::new(experts_dir).join(format!("{}.mq5", expert));
             let ex5_path = std::path::Path::new(experts_dir).join(format!("{}.ex5", expert));
-            let subdir_mq5 = std::path::Path::new(experts_dir).join(expert).join(format!("{}.mq5", expert));
+            let subdir_mq5 = std::path::Path::new(experts_dir)
+                .join(expert)
+                .join(format!("{}.mq5", expert));
             mq5_path.exists() || ex5_path.exists() || subdir_mq5.exists()
         } else {
             false
         };
-        
+
         Self {
             account,
             available_symbols,
@@ -40,7 +42,7 @@ impl BacktestPreflight {
             server,
         }
     }
-    
+
     #[allow(dead_code)]
     fn is_ready(&self) -> bool {
         self.account.is_some() && !self.available_symbols.is_empty() && self.ea_exists
@@ -48,17 +50,22 @@ impl BacktestPreflight {
 }
 
 pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value> {
-    let expert = args.get("expert")
+    let expert = args
+        .get("expert")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
     // Run pre-flight check
     let preflight = BacktestPreflight::check(config, expert);
-    
+
     // Get active account context for error messages
     let active_server = preflight.server.as_deref().unwrap_or("unknown");
-    let active_login = preflight.account.as_ref().map(|a| a.login.as_str()).unwrap_or("unknown");
-    
+    let active_login = preflight
+        .account
+        .as_ref()
+        .map(|a| a.login.as_str())
+        .unwrap_or("unknown");
+
     // Check account session first
     if preflight.account.is_none() {
         return Ok(json!({
@@ -70,45 +77,50 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
             "isError": true
         }));
     }
-    
+
     // Symbol pre-flight with account context
-    let requested_symbol = args.get("symbol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let requested_symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
     // No tester data at all → hard fail with helpful context
-    let no_symbols_error = || json!({
-        "content": [{ "type": "text", "text": json!({
-            "error": format!("No symbols available for backtesting on server '{}'.", active_server),
-            "account": { "login": active_login, "server": active_server },
-            "hint": "Open MT5 → View → Strategy Tester → download history for at least one symbol.",
-            "pre_check": "no_symbols"
-        }).to_string() }],
-        "isError": true
-    });
+    let no_symbols_error = || {
+        json!({
+            "content": [{ "type": "text", "text": json!({
+                "error": format!("No symbols available for backtesting on server '{}'.", active_server),
+                "account": { "login": active_login, "server": active_server },
+                "hint": "Open MT5 → View → Strategy Tester → download history for at least one symbol.",
+                "pre_check": "no_symbols"
+            }).to_string() }],
+            "isError": true
+        })
+    };
 
     let symbol: String = if requested_symbol.is_empty() {
         // No symbol requested — use config default or first available tester symbol.
         let candidate = config.backtest_symbol.as_deref().unwrap_or("");
         if candidate.is_empty() {
-            preflight.available_symbols.first()
+            preflight
+                .available_symbols
+                .first()
                 .cloned()
-                .ok_or(()
-                ).unwrap_or_else(|_| return String::new())
+                .unwrap_or_default()
         } else {
             match Config::resolve_symbol(candidate, &preflight.available_symbols) {
                 Some(resolved) => {
                     if resolved != candidate {
                         tracing::warn!(
                             "Config symbol '{}' not in tester data for '{}'; using '{}' instead",
-                            candidate, active_server, resolved
+                            candidate,
+                            active_server,
+                            resolved
                         );
                     }
                     resolved.to_string()
                 }
                 None => {
                     // Config default has no tester data — pick first available
-                    preflight.available_symbols.first()
+                    preflight
+                        .available_symbols
+                        .first()
                         .cloned()
                         .unwrap_or_default()
                 }
@@ -128,7 +140,9 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
                 // Fuzzy match — proceed with the corrected symbol, surface the substitution
                 tracing::warn!(
                     "Symbol '{}' not in tester data for '{}'; substituting '{}'",
-                    requested_symbol, active_server, resolved
+                    requested_symbol,
+                    active_server,
+                    resolved
                 );
                 resolved.to_string()
             }
@@ -157,7 +171,7 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
     if symbol.is_empty() {
         return Ok(no_symbols_error());
     }
-    
+
     // EA existence check with context
     if !preflight.ea_exists {
         return Ok(json!({
@@ -186,20 +200,48 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
         symbol: symbol.to_string(),
         from_date: from_date.to_string(),
         to_date: to_date.to_string(),
-        timeframe: args.get("timeframe").and_then(|v| v.as_str()).unwrap_or("M5").to_string(),
-        deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
+        timeframe: args
+            .get("timeframe")
+            .and_then(|v| v.as_str())
+            .unwrap_or("M5")
+            .to_string(),
+        deposit: args
+            .get("deposit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10000) as u32,
         model: args.get("model").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
         leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
-        set_file: args.get("set_file").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        skip_compile: args.get("skip_compile").and_then(|v| v.as_bool()).unwrap_or(false),
-        skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
-        skip_analyze: args.get("skip_analyze").and_then(|v| v.as_bool()).unwrap_or(false),
+        set_file: args
+            .get("set_file")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        skip_compile: args
+            .get("skip_compile")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        skip_clean: args
+            .get("skip_clean")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        skip_analyze: args
+            .get("skip_analyze")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         deep_analyze: args.get("deep").and_then(|v| v.as_bool()).unwrap_or(false),
-        shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true),
-        kill_existing: args.get("kill_existing").and_then(|v| v.as_bool()).unwrap_or(false),
+        shutdown: args
+            .get("shutdown")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        kill_existing: args
+            .get("kill_existing")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
-        startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
+        startup_delay_secs: args
+            .get("startup_delay_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         inactivity_kill_secs: args.get("inactivity_kill_secs").and_then(|v| v.as_u64()),
     };
 
@@ -217,7 +259,10 @@ pub async fn handle_run_backtest(config: &Config, args: &Value) -> Result<Value>
     }))
 }
 
-pub async fn handle_run_backtest_quick(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
+pub async fn handle_run_backtest_quick(
+    handler: &crate::tools::handlers::ToolHandler,
+    args: &Value,
+) -> Result<Value> {
     // Quick backtest: skip compile, clean → launch → background monitor → return job.
     // Uses the fire-and-forget launch path so the MCP response is returned immediately
     // and the result is available via get_backtest_status / get_latest_report once done.
@@ -229,7 +274,10 @@ pub async fn handle_run_backtest_quick(handler: &crate::tools::handlers::ToolHan
     handle_launch_backtest(handler, &args).await
 }
 
-pub async fn handle_run_backtest_only(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
+pub async fn handle_run_backtest_only(
+    handler: &crate::tools::handlers::ToolHandler,
+    args: &Value,
+) -> Result<Value> {
     // Backtest only: skip compile and analyze — launch and return job immediately.
     let mut args = args.clone();
     if let Some(obj) = args.as_object_mut() {
@@ -239,14 +287,18 @@ pub async fn handle_run_backtest_only(handler: &crate::tools::handlers::ToolHand
     handle_launch_backtest(handler, &args).await
 }
 
-pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandler, args: &Value) -> Result<Value> {
-    let expert = args.get("expert")
+pub async fn handle_launch_backtest(
+    handler: &crate::tools::handlers::ToolHandler,
+    args: &Value,
+) -> Result<Value> {
+    let expert = args
+        .get("expert")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
     // Run pre-flight check
     let preflight = BacktestPreflight::check(&handler.config, expert);
-    
+
     // Check account session
     if preflight.account.is_none() {
         return Ok(json!({
@@ -257,17 +309,19 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
             "isError": true
         }));
     }
-    
+
     // Get symbol — resolve against actual tester data (same logic as handle_run_backtest)
     let active_server = preflight.server.as_deref().unwrap_or("unknown");
-    let requested_symbol = args.get("symbol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let requested_symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
     let symbol: String = if requested_symbol.is_empty() {
         let candidate = handler.config.backtest_symbol.as_deref().unwrap_or("");
         if candidate.is_empty() {
-            preflight.available_symbols.first().cloned().unwrap_or_default()
+            preflight
+                .available_symbols
+                .first()
+                .cloned()
+                .unwrap_or_default()
         } else {
             Config::resolve_symbol(candidate, &preflight.available_symbols)
                 .map(|s| s.to_string())
@@ -280,7 +334,9 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
                 if resolved != requested_symbol {
                     tracing::warn!(
                         "launch_backtest: symbol '{}' not in tester data for '{}'; using '{}'",
-                        requested_symbol, active_server, resolved
+                        requested_symbol,
+                        active_server,
+                        resolved
                     );
                 }
                 resolved.to_string()
@@ -303,7 +359,7 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
             }
         }
     };
-    
+
     // EA existence check
     if !preflight.ea_exists {
         return Ok(json!({
@@ -331,13 +387,29 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
         symbol: symbol.to_string(),
         from_date: from_date.to_string(),
         to_date: to_date.to_string(),
-        timeframe: args.get("timeframe").and_then(|v| v.as_str()).unwrap_or("M5").to_string(),
-        deposit: args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32,
+        timeframe: args
+            .get("timeframe")
+            .and_then(|v| v.as_str())
+            .unwrap_or("M5")
+            .to_string(),
+        deposit: args
+            .get("deposit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10000) as u32,
         model: args.get("model").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
         leverage: args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32,
-        set_file: args.get("set_file").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        skip_compile: args.get("skip_compile").and_then(|v| v.as_bool()).unwrap_or(false),
-        skip_clean: args.get("skip_clean").and_then(|v| v.as_bool()).unwrap_or(false),
+        set_file: args
+            .get("set_file")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        skip_compile: args
+            .get("skip_compile")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        skip_clean: args
+            .get("skip_clean")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         skip_analyze: true, // Not needed for launch mode
         deep_analyze: false,
         // On Wine/macOS, ShutdownTerminal=1 does NOT reliably cause terminal64.exe to exit.
@@ -345,11 +417,17 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
         // tester log goes quiet, then polls for the HTML report for 30 s, then kills MT5.
         // If no inactivity_kill_secs is given (default None → disabled), the monitor relies
         // solely on timeout (900 s) or natural MT5 exit for completion detection.
-        shutdown: args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true),
+        shutdown: args
+            .get("shutdown")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         kill_existing: false,
         timeout: args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900),
         gui: args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false),
-        startup_delay_secs: args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0),
+        startup_delay_secs: args
+            .get("startup_delay_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         inactivity_kill_secs: args.get("inactivity_kill_secs").and_then(|v| v.as_u64()),
     };
 
@@ -378,12 +456,13 @@ pub async fn handle_launch_backtest(handler: &crate::tools::handlers::ToolHandle
 }
 
 pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Result<Value> {
-    let expert = args.get("expert")
+    let expert = args
+        .get("expert")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("expert is required"))?;
 
     let weeks_count = args.get("weeks").and_then(|v| v.as_u64()).unwrap_or(4) as i64;
-    if weeks_count < 1 || weeks_count > 52 {
+    if !(1..=52).contains(&weeks_count) {
         return Ok(json!({
             "content": [{ "type": "text", "text": "weeks must be between 1 and 52".to_string() }],
             "isError": true
@@ -418,7 +497,11 @@ pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Resul
                 std::cmp::min(week_end_raw, end)
             };
             let label = format!("Week {}", week_idx);
-            weeks.push((label, current.format("%Y.%m.%d").to_string(), week_end.format("%Y.%m.%d").to_string()));
+            weeks.push((
+                label,
+                current.format("%Y.%m.%d").to_string(),
+                week_end.format("%Y.%m.%d").to_string(),
+            ));
             current = week_end + chrono::Duration::days(1);
         }
         weeks
@@ -436,30 +519,63 @@ pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Resul
                 week_start.format("%b %d"),
                 week_end.format("%b %d")
             );
-            weeks.push((label, week_start.format("%Y.%m.%d").to_string(), week_end.format("%Y.%m.%d").to_string()));
+            weeks.push((
+                label,
+                week_start.format("%Y.%m.%d").to_string(),
+                week_end.format("%Y.%m.%d").to_string(),
+            ));
         }
         weeks
     };
 
-    let symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let timeframe = args.get("timeframe").and_then(|v| v.as_str()).unwrap_or("M5").to_string();
-    let deposit = args.get("deposit").and_then(|v| v.as_u64()).unwrap_or(10000) as u32;
+    let symbol = args
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let timeframe = args
+        .get("timeframe")
+        .and_then(|v| v.as_str())
+        .unwrap_or("M5")
+        .to_string();
+    let deposit = args
+        .get("deposit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10000) as u32;
     let model = args.get("model").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
     let leverage: u32 = args.get("leverage").and_then(|v| v.as_u64()).unwrap_or(500) as u32;
-    let set_file = args.get("set_file").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let set_file = args
+        .get("set_file")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let deep_analyze = args.get("deep").and_then(|v| v.as_bool()).unwrap_or(false);
-    let shutdown = args.get("shutdown").and_then(|v| v.as_bool()).unwrap_or(true);
-    let kill_existing = args.get("kill_existing").and_then(|v| v.as_bool()).unwrap_or(true);
+    let shutdown = args
+        .get("shutdown")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let kill_existing = args
+        .get("kill_existing")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(900);
     let gui = args.get("gui").and_then(|v| v.as_bool()).unwrap_or(false);
-    let startup_delay_secs = args.get("startup_delay_secs").and_then(|v| v.as_u64()).unwrap_or(0);
-    let skip_compile_first = args.get("skip_compile").and_then(|v| v.as_bool()).unwrap_or(false);
+    let startup_delay_secs = args
+        .get("startup_delay_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let skip_compile_first = args
+        .get("skip_compile")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Create a rolling job report dir for status tracking
     let report_id = format!(
         "ROLLING_{}_{}_{}",
         expert,
-        weeks.first().map(|w| &w.1).unwrap_or(&"unknown".to_string()),
+        weeks
+            .first()
+            .map(|w| &w.1)
+            .unwrap_or(&"unknown".to_string()),
         weeks.last().map(|w| &w.2).unwrap_or(&"unknown".to_string()),
     );
     let report_dir = config.reports_dir().join(&report_id);
@@ -482,9 +598,12 @@ pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Resul
 
     // Save the weekly schedule for status polling
     let weeks_path = report_dir.join("weeks.json");
-    fs::write(&weeks_path, serde_json::to_string_pretty(&json!({
-        "weeks": weeks.iter().map(|(l, f, t)| json!({"label": l, "from_date": f, "to_date": t})).collect::<Vec<_>>()
-    }))?)?;
+    fs::write(
+        &weeks_path,
+        serde_json::to_string_pretty(&json!({
+            "weeks": weeks.iter().map(|(l, f, t)| json!({"label": l, "from_date": f, "to_date": t})).collect::<Vec<_>>()
+        }))?,
+    )?;
 
     // Spawn background task to run all weeks sequentially
     let config_clone = config.clone();
@@ -514,7 +633,9 @@ pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Resul
             startup_delay_secs,
             skip_compile_first,
             weeks_clone,
-        ).await {
+        )
+        .await
+        {
             tracing::error!("Rolling backtest failed: {}", e);
         }
     });
@@ -533,6 +654,9 @@ pub async fn handle_run_rolling_backtest(config: &Config, args: &Value) -> Resul
     }))
 }
 
+// Internal helper: parameters mirror the run_rolling_backtest tool inputs 1:1 and are
+// passed through to per-week launches; a struct would only relocate the argument list.
+#[allow(clippy::too_many_arguments)]
 async fn run_rolling_weeks_sequential(
     config: Config,
     report_dir: PathBuf,
@@ -552,11 +676,7 @@ async fn run_rolling_weeks_sequential(
     skip_compile_first: bool,
     weeks: Vec<(String, String, String)>,
 ) -> Result<()> {
-    let pipeline = if cfg!(debug_assertions) {
-        BacktestPipeline::new(config.clone())
-    } else {
-        BacktestPipeline::new(config.clone())
-    };
+    let pipeline = BacktestPipeline::new(config.clone());
     let progress_log = report_dir.join("progress.log");
 
     // Clear stale results
@@ -577,10 +697,26 @@ async fn run_rolling_weeks_sequential(
     for (idx, (label, from_date, to_date)) in weeks.iter().enumerate() {
         let skip_compile = if idx == 0 { skip_compile_first } else { true };
 
-        fs::write(&progress_log, format!("WEEK {}: {} ({} -> {})\n", idx + 1, label, from_date, to_date))
-            .unwrap_or(());
+        fs::write(
+            &progress_log,
+            format!(
+                "WEEK {}: {} ({} -> {})\n",
+                idx + 1,
+                label,
+                from_date,
+                to_date
+            ),
+        )
+        .unwrap_or(());
 
-        tracing::info!("Rolling week {}/{}: {} ({} -> {})", idx + 1, weeks.len(), label, from_date, to_date);
+        tracing::info!(
+            "Rolling week {}/{}: {} ({} -> {})",
+            idx + 1,
+            weeks.len(),
+            label,
+            from_date,
+            to_date
+        );
 
         // Clean slate before each week
         for pat in &["MetaTrader 5.app", "terminal64.exe", "wineserver"] {
@@ -614,7 +750,12 @@ async fn run_rolling_weeks_sequential(
         let job = match pipeline.launch_backtest(params).await {
             Ok(j) => j,
             Err(e) => {
-                tracing::error!("Rolling week {}/{} launch failed: {}", idx + 1, weeks.len(), e);
+                tracing::error!(
+                    "Rolling week {}/{} launch failed: {}",
+                    idx + 1,
+                    weeks.len(),
+                    e
+                );
                 week_results.push(json!({
                     "label": label, "from_date": from_date, "to_date": to_date,
                     "success": false, "error": format!("launch failed: {}", e)
@@ -632,15 +773,24 @@ async fn run_rolling_weeks_sequential(
 
             // Check for metrics.json (written after extraction, including journal fallback)
             let metrics_path = week_report_dir.join("metrics.json");
-            if metrics_path.exists() { break; }
+            if metrics_path.exists() {
+                break;
+            }
 
             let jp = week_report_dir.join("job.json");
             if let Ok(content) = fs::read_to_string(&jp) {
                 if let Ok(j) = serde_json::from_str::<BacktestJob>(&content) {
                     if let Some(ref s) = j.status {
-                        if s == "completed" || s == "completed_no_html" { break; }
+                        if s == "completed" || s == "completed_no_html" {
+                            break;
+                        }
                         if s == "failed" || s == "timeout" || s == "timeout_inactive" {
-                            tracing::warn!("Rolling week {}/{} background status: {}", idx + 1, weeks.len(), s);
+                            tracing::warn!(
+                                "Rolling week {}/{} background status: {}",
+                                idx + 1,
+                                weeks.len(),
+                                s
+                            );
                             break;
                         }
                     }
@@ -648,7 +798,12 @@ async fn run_rolling_weeks_sequential(
             }
 
             if poll_start.elapsed() > max_wait {
-                tracing::warn!("Rolling week {}/{} timed out after {}s", idx + 1, weeks.len(), timeout);
+                tracing::warn!(
+                    "Rolling week {}/{} timed out after {}s",
+                    idx + 1,
+                    weeks.len(),
+                    timeout
+                );
                 break;
             }
         }
@@ -660,16 +815,36 @@ async fn run_rolling_weeks_sequential(
         let metrics_path = week_report_dir.join("metrics.json");
         if let Ok(content) = fs::read_to_string(&metrics_path) {
             if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(&content) {
-                let np = metrics.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let dd = metrics.get("max_dd_pct").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let trades = metrics.get("total_trades").and_then(|v| v.as_u64()).unwrap_or(0);
-                let pf = metrics.get("profit_factor").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let np = metrics
+                    .get("net_profit")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let dd = metrics
+                    .get("max_dd_pct")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let trades = metrics
+                    .get("total_trades")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let pf = metrics
+                    .get("profit_factor")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
 
                 total_net_profit += np;
-                if dd > max_drawdown { max_drawdown = dd; }
+                if dd > max_drawdown {
+                    max_drawdown = dd;
+                }
                 total_trades += trades;
 
-                tracing::info!("Rolling week {}/{} done: profit={:.2}, dd={:.1}%", idx + 1, weeks.len(), np, dd);
+                tracing::info!(
+                    "Rolling week {}/{} done: profit={:.2}, dd={:.1}%",
+                    idx + 1,
+                    weeks.len(),
+                    np,
+                    dd
+                );
 
                 week_results.push(json!({
                     "label": label, "from_date": from_date, "to_date": to_date,
@@ -715,19 +890,25 @@ async fn run_rolling_weeks_sequential(
     }
 
     fs::write(&progress_log, "DONE\n").unwrap_or(());
-    tracing::info!("Rolling backtest completed: {} weeks, profit={:.2}, max_dd={:.1}%", week_results.len(), total_net_profit, max_drawdown);
+    tracing::info!(
+        "Rolling backtest completed: {} weeks, profit={:.2}, max_dd={:.1}%",
+        week_results.len(),
+        total_net_profit,
+        max_drawdown
+    );
     Ok(())
 }
 
 pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Result<Value> {
-    let report_dir = args.get("report_dir")
+    let report_dir = args
+        .get("report_dir")
         .and_then(|v| v.as_str())
         .unwrap_or("latest");
 
     let report_path = Path::new(report_dir);
     let progress_file = report_path.join("progress.log");
     let job_file = report_path.join("job.json");
-    
+
     // Load job info if available
     let job: Option<BacktestJob> = if job_file.exists() {
         fs::read_to_string(&job_file)
@@ -736,12 +917,13 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     } else {
         None
     };
-    
+
     // Check progress log for stage
     let (stage, progress_lines) = if progress_file.exists() {
         if let Ok(content) = fs::read_to_string(&progress_file) {
             let lines: Vec<&str> = content.lines().collect();
-            let last_stage = lines.last()
+            let last_stage = lines
+                .last()
                 .and_then(|l| l.split_whitespace().next())
                 .unwrap_or("UNKNOWN");
             (last_stage.to_string(), lines.len())
@@ -751,12 +933,13 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     } else {
         ("NOT_STARTED".to_string(), 0)
     };
-    
+
     // Check if MT5 is running
     let mt5_running = is_mt5_running();
-    
+
     // Check if report file exists (still on disk — it's deleted after extraction)
-    let report_found = job.as_ref()
+    let report_found = job
+        .as_ref()
         .map(|j| Path::new(&j.expected_report_path).exists())
         .unwrap_or(false);
 
@@ -766,18 +949,15 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     // Read the authoritative status written by the background monitor into job.json.
     // This avoids false "failed" when the HTML was extracted+deleted (report_found=false)
     // or when journal extraction ran instead of HTML extraction.
-    let job_status = job.as_ref()
-        .and_then(|j| j.status.as_deref())
-        .unwrap_or("");
+    let job_status = job.as_ref().and_then(|j| j.status.as_deref()).unwrap_or("");
     let monitor_says_complete = matches!(job_status, "completed" | "completed_no_html");
-    let monitor_says_failed   = matches!(job_status, "failed" | "timeout" | "timeout_inactive");
+    let monitor_says_failed = matches!(job_status, "failed" | "timeout" | "timeout_inactive");
 
-    let is_complete = monitor_says_complete
-        || stage == "DONE"
-        || (report_found && metrics_exists);
+    let is_complete = monitor_says_complete || stage == "DONE" || (report_found && metrics_exists);
 
     // Calculate elapsed time if job exists
-    let elapsed_seconds = job.as_ref()
+    let elapsed_seconds = job
+        .as_ref()
         .and_then(|j| {
             chrono::DateTime::parse_from_rfc3339(&j.launched_at)
                 .ok()
@@ -789,7 +969,11 @@ pub async fn handle_get_backtest_status(_config: &Config, args: &Value) -> Resul
     let status_msg = if is_complete {
         "completed"
     } else if monitor_says_failed {
-        if job_status == "timeout" || job_status == "timeout_inactive" { "timeout" } else { "failed" }
+        if job_status == "timeout" || job_status == "timeout_inactive" {
+            "timeout"
+        } else {
+            "failed"
+        }
     } else if stage == "BACKTEST" && mt5_running {
         "running"
     } else if stage == "BACKTEST" && !mt5_running {
@@ -848,7 +1032,7 @@ fn is_mt5_running() -> bool {
     } else {
         vec!["terminal64\\.exe", "metatrader"]
     };
-    
+
     patterns.iter().any(|pat| {
         Command::new("pgrep")
             .args(["-f", pat])
@@ -863,7 +1047,10 @@ fn is_mt5_running() -> bool {
 pub async fn handle_get_tester_log(config: &Config, args: &Value) -> Result<Value> {
     use crate::pipeline::backtest::BacktestPipeline;
 
-    let tail_lines = args.get("tail_lines").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+    let tail_lines = args
+        .get("tail_lines")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100) as usize;
 
     let log_path = match BacktestPipeline::find_active_tester_agent_log(config) {
         Some(p) => p,
@@ -893,7 +1080,8 @@ pub async fn handle_get_tester_log(config: &Config, args: &Value) -> Result<Valu
     let (deals, final_balance_pips, progress) = BacktestPipeline::parse_journal_deals(&lines);
 
     // Collect tail lines
-    let tail: Vec<&str> = lines.iter()
+    let tail: Vec<&str> = lines
+        .iter()
         .rev()
         .take(tail_lines)
         .rev()
@@ -901,7 +1089,9 @@ pub async fn handle_get_tester_log(config: &Config, args: &Value) -> Result<Valu
         .collect();
 
     // Detect last sim timestamp for progress estimation
-    let last_sim_time = lines.iter().rev()
+    let last_sim_time = lines
+        .iter()
+        .rev()
         .find_map(|l| {
             let parts: Vec<&str> = l.split_whitespace().collect();
             // Format: XX  0  HH:MM:SS.mmm  Core NN  YYYY.MM.DD HH:MM:SS ...
@@ -940,25 +1130,27 @@ pub async fn handle_get_tester_log(config: &Config, args: &Value) -> Result<Valu
 }
 
 pub async fn handle_cache_status(config: &Config) -> Result<Value> {
-    let cache_dir = config.tester_cache_dir.as_ref()
-        .map(|s| Path::new(s))
+    let cache_dir = config
+        .tester_cache_dir
+        .as_ref()
+        .map(Path::new)
         .filter(|p| p.exists());
 
     let mut total_size: u64 = 0;
     let mut symbols = Vec::new();
 
     if let Some(dir) = cache_dir {
-        for entry in walkdir::WalkDir::new(dir).max_depth(2) {
-            if let Ok(entry) = entry {
-                if entry.file_type().is_dir() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        symbols.push(name.to_string());
-                    }
-                } else {
-                    if let Ok(meta) = entry.metadata() {
-                        total_size += meta.len();
-                    }
+        for entry in walkdir::WalkDir::new(dir)
+            .max_depth(2)
+            .into_iter()
+            .flatten()
+        {
+            if entry.file_type().is_dir() {
+                if let Some(name) = entry.file_name().to_str() {
+                    symbols.push(name.to_string());
                 }
+            } else if let Ok(meta) = entry.metadata() {
+                total_size += meta.len();
             }
         }
     }
@@ -976,24 +1168,27 @@ pub async fn handle_cache_status(config: &Config) -> Result<Value> {
 
 pub async fn handle_clean_cache(config: &Config, args: &Value) -> Result<Value> {
     let _symbol = args.get("symbol").and_then(|v| v.as_str());
-    let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+    let dry_run = args
+        .get("dry_run")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    let cache_dir = config.tester_cache_dir.as_ref()
-        .map(|s| Path::new(s))
+    let cache_dir = config
+        .tester_cache_dir
+        .as_ref()
+        .map(Path::new)
         .filter(|p| p.exists());
 
     let mut bytes_freed: u64 = 0;
 
     if let Some(dir) = cache_dir {
-        for entry in walkdir::WalkDir::new(dir) {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.extension().map(|e| e == "tst").unwrap_or(false) {
-                    if let Ok(meta) = entry.metadata() {
-                        bytes_freed += meta.len();
-                        if !dry_run {
-                            let _ = fs::remove_file(path);
-                        }
+        for entry in walkdir::WalkDir::new(dir).into_iter().flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "tst").unwrap_or(false) {
+                if let Ok(meta) = entry.metadata() {
+                    bytes_freed += meta.len();
+                    if !dry_run {
+                        let _ = fs::remove_file(path);
                     }
                 }
             }

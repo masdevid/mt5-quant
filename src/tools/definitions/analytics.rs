@@ -1,7 +1,8 @@
 use serde_json::{json, Value};
 
 // Common description suffix for all analytics tools
-const REPORT_HINT: &str = "report_id (preferred), report_dir (legacy path), or omit for latest report.";
+const REPORT_HINT: &str =
+    "report_id (preferred), report_dir (legacy path), or omit for latest report.";
 
 pub fn tool_analyze_report() -> Value {
     json!({

@@ -68,7 +68,8 @@ impl ReportDb {
             std::fs::create_dir_all(parent)?;
         }
         let conn = self.connect()?;
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS deals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -119,7 +120,8 @@ impl ReportDb {
             CREATE INDEX IF NOT EXISTS idx_reports_expert ON reports(expert);
             CREATE INDEX IF NOT EXISTS idx_reports_symbol ON reports(symbol);
             CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
-        ")?;
+        ",
+        )?;
         Ok(())
     }
 
@@ -355,8 +357,7 @@ impl ReportDb {
 
         param_vals.push(id.to_string());
         let sql = format!("UPDATE reports SET {} WHERE id = ?", sets.join(", "));
-        let changed =
-            conn.execute(&sql, rusqlite::params_from_iter(param_vals.iter()))?;
+        let changed = conn.execute(&sql, rusqlite::params_from_iter(param_vals.iter()))?;
         Ok(changed > 0)
     }
 
@@ -366,8 +367,7 @@ impl ReportDb {
         keep_last: usize,
     ) -> Result<Vec<(String, String, Option<String>)>> {
         let conn = self.connect()?;
-        let count: usize =
-            conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
+        let count: usize = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
 
         if count <= keep_last {
             return Ok(Vec::new());
@@ -417,7 +417,7 @@ impl ReportDb {
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports ORDER BY created_at DESC LIMIT 1"
+            FROM reports ORDER BY created_at DESC LIMIT 1",
         )?;
 
         let entry = stmt
@@ -468,7 +468,7 @@ impl ReportDb {
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE report_dir = ?"
+            FROM reports WHERE report_dir = ?",
         )?;
 
         let entry = stmt
@@ -519,7 +519,7 @@ impl ReportDb {
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE id = ?"
+            FROM reports WHERE id = ?",
         )?;
 
         let entry = stmt
@@ -577,7 +577,9 @@ impl ReportDb {
                 vec![(limit as i64).into()],
             )
         } else {
-            let placeholders = tags.iter().enumerate()
+            let placeholders = tags
+                .iter()
+                .enumerate()
                 .map(|(i, _)| format!("tags LIKE ?{}", i + 1))
                 .collect::<Vec<_>>()
                 .join(" OR ");
@@ -587,9 +589,8 @@ impl ReportDb {
                 placeholders,
                 tags.len() + 1
             );
-            let mut p: Vec<rusqlite::types::Value> = tags.iter()
-                .map(|t| format!("%{}%", t).into())
-                .collect();
+            let mut p: Vec<rusqlite::types::Value> =
+                tags.iter().map(|t| format!("%{}%", t).into()).collect();
             p.push((limit as i64).into());
             (sql, p)
         };
@@ -644,7 +645,7 @@ impl ReportDb {
             net_profit, profit_factor, max_dd_pct, sharpe_ratio, total_trades, \
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
-            FROM reports WHERE notes LIKE ?1 ORDER BY created_at DESC LIMIT ?2"
+            FROM reports WHERE notes LIKE ?1 ORDER BY created_at DESC LIMIT ?2",
         )?;
 
         let entries: Vec<ReportEntry> = stmt
@@ -697,7 +698,7 @@ impl ReportDb {
             win_rate_pct, recovery_factor, deposit, currency, leverage, \
             duration_seconds, tags, notes, verdict \
             FROM reports WHERE (set_file_original LIKE ?1 OR set_snapshot_path LIKE ?1) \
-            ORDER BY created_at DESC LIMIT ?2"
+            ORDER BY created_at DESC LIMIT ?2",
         )?;
 
         let entries: Vec<ReportEntry> = stmt
@@ -900,8 +901,16 @@ impl ReportDb {
         let conn = self.connect()?;
 
         // Validate sort column to prevent SQL injection
-        let valid_columns = ["net_profit", "profit_factor", "max_dd_pct", "win_rate_pct",
-                            "sharpe_ratio", "recovery_factor", "total_trades", "created_at"];
+        let valid_columns = [
+            "net_profit",
+            "profit_factor",
+            "max_dd_pct",
+            "win_rate_pct",
+            "sharpe_ratio",
+            "recovery_factor",
+            "total_trades",
+            "created_at",
+        ];
         if !valid_columns.contains(&sort_column) {
             return Err(anyhow::anyhow!("Invalid sort column: {}", sort_column));
         }
@@ -939,7 +948,10 @@ impl ReportDb {
         }
 
         let order = if ascending { "ASC" } else { "DESC" };
-        sql.push_str(&format!(" ORDER BY {} {} LIMIT {}", sort_column, order, limit));
+        sql.push_str(&format!(
+            " ORDER BY {} {} LIMIT {}",
+            sort_column, order, limit
+        ));
 
         let mut stmt = conn.prepare(&sql)?;
         let entries: Vec<ReportEntry> = stmt

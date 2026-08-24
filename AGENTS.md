@@ -79,7 +79,7 @@ MT5-Quant/
 │   ├── integration_test.sh    # Shell-based integration tests
 │   └── fixtures/              # Sample reports + CSVs for testing
 ├── server.json                # MCP registry manifest (tracked)
-├── Cargo.toml                 # version = 1.32.4
+├── Cargo.toml                 # version = 1.34.0
 └── CHANGELOG.md
 ```
 

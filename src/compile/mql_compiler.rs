@@ -30,28 +30,42 @@ impl MqlCompiler {
     }
 
     pub async fn compile(&self, source_path: &str) -> Result<CompileResult> {
-        self.compile_with_timeout(source_path, Duration::from_secs(120)).await
+        self.compile_with_timeout(source_path, Duration::from_secs(120))
+            .await
     }
 
-    pub async fn compile_with_timeout(&self, source_path: &str, timeout: Duration) -> Result<CompileResult> {
+    pub async fn compile_with_timeout(
+        &self,
+        source_path: &str,
+        timeout: Duration,
+    ) -> Result<CompileResult> {
         let source_path = Path::new(source_path);
         if !source_path.exists() {
             return Err(anyhow!("Source file not found: {}", source_path.display()));
         }
 
-        let mt5_dir = self.config.mt5_dir()
+        let mt5_dir = self
+            .config
+            .mt5_dir()
             .ok_or_else(|| anyhow!("terminal_dir not configured"))?;
         let metaeditor = mt5_dir.join("metaeditor64.exe");
         if !metaeditor.exists() {
-            return Err(anyhow!("metaeditor64.exe not found at: {}", metaeditor.display()));
+            return Err(anyhow!(
+                "metaeditor64.exe not found at: {}",
+                metaeditor.display()
+            ));
         }
 
-        let wine_exe = self.config.wine_executable.as_ref()
+        let wine_exe = self
+            .config
+            .wine_executable
+            .as_ref()
             .ok_or_else(|| anyhow!("wine_executable not configured"))?;
         let wine_prefix = self.get_wine_prefix(&mt5_dir)?;
 
         let ea_name = source_path
-            .file_stem().and_then(|s| s.to_str())
+            .file_stem()
+            .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow!("Invalid source file name"))?;
 
         // Stage to /tmp to avoid spaces in path (wine /compile: chokes on spaces)
@@ -64,28 +78,45 @@ impl MqlCompiler {
         // Sync full project tree into staging dir
         let sync = self.sync_project_to_experts(source_path, &stage_dir)?;
         let staged_mq5 = &sync.dest_mq5;
-        tracing::info!("Staged {} file(s) to: {}", sync.files_copied, staged_mq5.display());
+        tracing::info!(
+            "Staged {} file(s) to: {}",
+            sync.files_copied,
+            staged_mq5.display()
+        );
 
-        self.run_metaeditor_with_timeout(wine_exe, &wine_prefix, &metaeditor, staged_mq5, timeout).await?;
+        self.run_metaeditor_with_timeout(wine_exe, &wine_prefix, &metaeditor, staged_mq5, timeout)
+            .await?;
 
         // /log flag (no path) writes log adjacent to source: {ea_name}.log
         let log_path = staged_mq5.with_extension("log");
         let log_text = Self::read_log(&log_path);
-        tracing::info!("Compile log ({} chars):\n{}", log_text.len(), &log_text[..log_text.len().min(500)]);
+        tracing::info!(
+            "Compile log ({} chars):\n{}",
+            log_text.len(),
+            &log_text[..log_text.len().min(500)]
+        );
 
         // Log format: "path : error: message" / "path : warning: message"
-        let errors: Vec<String> = log_text.lines()
+        let errors: Vec<String> = log_text
+            .lines()
             .filter(|l| {
                 let low = l.to_lowercase();
-                low.contains(": error:") || (low.contains("error") && !low.contains("0 error") && !low.contains("information"))
+                low.contains(": error:")
+                    || (low.contains("error")
+                        && !low.contains("0 error")
+                        && !low.contains("information"))
             })
             .map(|s| s.to_string())
             .collect();
 
-        let warnings: Vec<String> = log_text.lines()
+        let warnings: Vec<String> = log_text
+            .lines()
             .filter(|l| {
                 let low = l.to_lowercase();
-                low.contains(": warning:") || (low.contains("warning") && !low.contains("0 warning") && !low.contains("information"))
+                low.contains(": warning:")
+                    || (low.contains("warning")
+                        && !low.contains("0 warning")
+                        && !low.contains("information"))
             })
             .map(|s| s.to_string())
             .collect();
@@ -93,7 +124,10 @@ impl MqlCompiler {
         let staged_ex5 = staged_mq5.with_extension("ex5");
         if !staged_ex5.exists() {
             let final_errors = if errors.is_empty() {
-                vec![format!("Compilation failed. Log:\n{}", &log_text[log_text.len().saturating_sub(500)..])]
+                vec![format!(
+                    "Compilation failed. Log:\n{}",
+                    &log_text[log_text.len().saturating_sub(500)..]
+                )]
             } else {
                 errors
             };
@@ -177,10 +211,22 @@ impl MqlCompiler {
                 .follow_links(true)
                 .into_iter()
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().and_then(|x| x.to_str()).map(|x| x == "mq5" || x == "mqh").unwrap_or(false))
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        .map(|x| x == "mq5" || x == "mqh")
+                        .unwrap_or(false)
+                })
                 .count();
-            tracing::info!("Source already in Experts dir, skipping sync ({} files)", files_copied);
-            return Ok(SyncStats { dest_mq5, files_copied });
+            tracing::info!(
+                "Source already in Experts dir, skipping sync ({} files)",
+                files_copied
+            );
+            return Ok(SyncStats {
+                dest_mq5,
+                files_copied,
+            });
         }
 
         if dest_dir.exists() {
@@ -208,7 +254,8 @@ impl MqlCompiler {
             if path.extension().and_then(|e| e.to_str()) != Some("mqh") {
                 continue;
             }
-            let relative = path.strip_prefix(project_root)
+            let relative = path
+                .strip_prefix(project_root)
                 .map_err(|_| anyhow!("Cannot relativise {}", path.display()))?;
             let dest = dest_dir.join(relative);
             if let Some(parent) = dest.parent() {
@@ -225,7 +272,10 @@ impl MqlCompiler {
             files_copied
         );
 
-        Ok(SyncStats { dest_mq5, files_copied })
+        Ok(SyncStats {
+            dest_mq5,
+            files_copied,
+        })
     }
 
     /// Run MetaEditor to compile `source_mq5` with timeout.
@@ -242,8 +292,10 @@ impl MqlCompiler {
         let mt5_dir = metaeditor.parent().unwrap_or(metaeditor);
 
         if wine_exe.contains("MetaTrader 5.app") {
-            let wine_bin  = Path::new(wine_exe);
-            let wine_root = wine_bin.parent().and_then(|p| p.parent())
+            let wine_bin = Path::new(wine_exe);
+            let wine_root = wine_bin
+                .parent()
+                .and_then(|p| p.parent())
                 .map(|p| p.to_path_buf())
                 .ok_or_else(|| anyhow!("Cannot derive Wine root"))?;
             let dyld = format!(
@@ -251,8 +303,11 @@ impl MqlCompiler {
                 wine_root.join("lib").join("external").display(),
                 wine_root.join("lib").display(),
             );
-            let editor_host = wine_prefix.join("drive_c")
-                .join("Program Files").join("MetaTrader 5").join("MetaEditor64.exe");
+            let editor_host = wine_prefix
+                .join("drive_c")
+                .join("Program Files")
+                .join("MetaTrader 5")
+                .join("MetaEditor64.exe");
             let script = format!(
                 "#!/bin/sh\n\
                  export DYLD_FALLBACK_LIBRARY_PATH='{dyld}'\n\
@@ -260,12 +315,12 @@ impl MqlCompiler {
                  export WINEDEBUG='-all'\n\
                  cd '{mt5_dir}'\n\
                  '{wine}' '{editor}' '/compile:{src}' /log 2>/dev/null\n",
-                dyld    = dyld,
-                prefix  = wine_prefix.display(),
-                wine    = wine_exe,
-                editor  = editor_host.display(),
+                dyld = dyld,
+                prefix = wine_prefix.display(),
+                wine = wine_exe,
+                editor = editor_host.display(),
                 mt5_dir = mt5_dir.display(),
-                src     = source_mq5.display(),
+                src = source_mq5.display(),
             );
             let script_path = std::env::temp_dir().join("mt5_compile.sh");
             fs::write(&script_path, &script)?;
@@ -277,8 +332,9 @@ impl MqlCompiler {
             let compile_future = tokio::process::Command::new("/bin/sh")
                 .arg(&script_path)
                 .output();
-            let result = tokio_timeout(timeout, compile_future).await
-                .map_err(|_| anyhow!("Compilation timed out after {} seconds", timeout.as_secs()))?;
+            let result = tokio_timeout(timeout, compile_future).await.map_err(|_| {
+                anyhow!("Compilation timed out after {} seconds", timeout.as_secs())
+            })?;
             result?;
         } else {
             let compile_future = tokio::process::Command::new(wine_exe)
@@ -289,17 +345,21 @@ impl MqlCompiler {
                 .env("WINEDEBUG", "-all")
                 .current_dir(mt5_dir)
                 .output();
-            let result = tokio_timeout(timeout, compile_future).await
-                .map_err(|_| anyhow!("Compilation timed out after {} seconds", timeout.as_secs()))?;
+            let result = tokio_timeout(timeout, compile_future).await.map_err(|_| {
+                anyhow!("Compilation timed out after {} seconds", timeout.as_secs())
+            })?;
             result?;
         }
         Ok(())
     }
 
     fn read_log(log_path: &Path) -> String {
-        let Ok(raw) = fs::read(log_path) else { return String::new() };
+        let Ok(raw) = fs::read(log_path) else {
+            return String::new();
+        };
         if raw.starts_with(&[0xFF, 0xFE]) {
-            raw[2..].chunks_exact(2)
+            raw[2..]
+                .chunks_exact(2)
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .filter_map(|c| char::from_u32(c as u32))
                 .collect()

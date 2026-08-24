@@ -44,7 +44,9 @@ impl ReportExtractor {
 
         if let Ok(file) = fs::read(path) {
             let header = &file[..file.len().min(512)];
-            if header.windows(5).any(|w| w == b"<?xml") || header.windows(8).any(|w| w == b"Workbook") {
+            if header.windows(5).any(|w| w == b"<?xml")
+                || header.windows(8).any(|w| w == b"Workbook")
+            {
                 return ReportFormat::Xml;
             }
         }
@@ -54,10 +56,10 @@ impl ReportExtractor {
 
     fn parse_html(&self, path: &str) -> Result<(Metrics, Vec<Deal>)> {
         let text = Self::read_text(path)?;
-        
-        let metrics = Metrics::from_html(&text)
-            .ok_or_else(|| anyhow!("No metrics found in HTML report"))?;
-        
+
+        let metrics =
+            Metrics::from_html(&text).ok_or_else(|| anyhow!("No metrics found in HTML report"))?;
+
         let deals = self.parse_deals_html(&text)?;
 
         Ok((metrics, deals))
@@ -65,10 +67,9 @@ impl ReportExtractor {
 
     fn parse_xml(&self, path: &str) -> Result<(Metrics, Vec<Deal>)> {
         let text = Self::read_text(path)?;
-        
-        let metrics = Metrics::from_html(&text)
-            .unwrap_or_default();
-        
+
+        let metrics = Metrics::from_html(&text).unwrap_or_default();
+
         let deals = self.parse_deals_xml(&text)?;
 
         Ok((metrics, deals))
@@ -91,15 +92,16 @@ impl ReportExtractor {
             .map_err(|e| anyhow!("Cell regex error: {}", e))?;
 
         // Collect all <tr> blocks once, then find the deals header and parse from there.
-        let rows: Vec<&str> = row_re.captures_iter(text)
+        let rows: Vec<&str> = row_re
+            .captures_iter(text)
             .filter_map(|cap| cap.get(0).map(|m| m.as_str()))
             .collect();
 
         // Find the header row index: it must contain both "Deal" and "Symbol" (case-insensitive).
         let header_idx = rows.iter().position(|row| {
             let lower = row.to_lowercase();
-            (lower.contains(">deal<") || lower.contains(">deal </")) &&
-            (lower.contains(">symbol<") || lower.contains(">symbol </"))
+            (lower.contains(">deal<") || lower.contains(">deal </"))
+                && (lower.contains(">symbol<") || lower.contains(">symbol </"))
         });
 
         let start_idx = match header_idx {
@@ -108,7 +110,9 @@ impl ReportExtractor {
                 // Fallback: look for any row containing Time+Volume+Profit headers
                 let alt = rows.iter().position(|row| {
                     let lower = row.to_lowercase();
-                    lower.contains(">time<") && lower.contains(">volume<") && lower.contains(">profit<")
+                    lower.contains(">time<")
+                        && lower.contains(">volume<")
+                        && lower.contains(">profit<")
                 });
                 match alt {
                     Some(i) => i + 1,
@@ -121,7 +125,8 @@ impl ReportExtractor {
         };
 
         for row in &rows[start_idx..] {
-            let cells: Vec<String> = cell_re.captures_iter(row)
+            let cells: Vec<String> = cell_re
+                .captures_iter(row)
                 .filter_map(|cap| cap.get(1))
                 .map(|m| Self::strip_tags(m.as_str()))
                 .map(|s| s.replace(',', ""))
@@ -132,35 +137,43 @@ impl ReportExtractor {
             }
 
             // Skip balance/credit operation rows (Type column is index 3 in MT5 HTML)
-            let type_cell = cells.get(3).map(|s| s.trim().to_lowercase()).unwrap_or_default();
+            let type_cell = cells
+                .get(3)
+                .map(|s| s.trim().to_lowercase())
+                .unwrap_or_default();
             if type_cell == "balance" || type_cell == "credit" {
                 continue;
             }
             // Also skip sub-header rows that repeat column names
-            if type_cell == "type" || cells.get(1).map(|s| s.trim().to_lowercase()).as_deref() == Some("deal") {
+            if type_cell == "type"
+                || cells.get(1).map(|s| s.trim().to_lowercase()).as_deref() == Some("deal")
+            {
                 continue;
             }
             // Skip rows with no deal number (e.g. totals row)
-            let deal_num = cells.get(1).map(|s| s.trim().to_string()).unwrap_or_default();
+            let deal_num = cells
+                .get(1)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             if deal_num.is_empty() {
                 continue;
             }
 
             let deal = Deal {
-                time:       cells.get(0).cloned().unwrap_or_default(),
-                deal:       deal_num,
-                symbol:     cells.get(2).cloned().unwrap_or_default(),
-                deal_type:  cells.get(3).cloned().unwrap_or_default(),
-                entry:      cells.get(4).cloned().unwrap_or_default(),
-                volume:     cells.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                price:      cells.get(6).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                order:      cells.get(7).cloned().unwrap_or_default(),
+                time: cells.first().cloned().unwrap_or_default(),
+                deal: deal_num,
+                symbol: cells.get(2).cloned().unwrap_or_default(),
+                deal_type: cells.get(3).cloned().unwrap_or_default(),
+                entry: cells.get(4).cloned().unwrap_or_default(),
+                volume: cells.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                price: cells.get(6).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                order: cells.get(7).cloned().unwrap_or_default(),
                 commission: cells.get(8).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                swap:       cells.get(9).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                profit:     cells.get(10).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                balance:    cells.get(11).and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                comment:    cells.get(12).cloned().unwrap_or_default(),
-                magic:      cells.get(13).cloned(),
+                swap: cells.get(9).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                profit: cells.get(10).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                balance: cells.get(11).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                comment: cells.get(12).cloned().unwrap_or_default(),
+                magic: cells.get(13).cloned(),
             };
 
             deals.push(deal);
@@ -177,25 +190,43 @@ impl ReportExtractor {
 
         let row_re = regex::Regex::new(r"<Row[^>]*>(.*?)</Row>")
             .map_err(|e| anyhow!("Regex error: {}", e))?;
-        
+
         let cell_re = regex::Regex::new(r"<Cell[^>]*>.*?<Data[^>]*>(.*?)</Data>.*?</Cell>")
             .map_err(|e| anyhow!("Regex error: {}", e))?;
 
         for row_caps in row_re.captures_iter(text) {
             let row = row_caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            
-            let cells: Vec<String> = cell_re.captures_iter(row)
+
+            let cells: Vec<String> = cell_re
+                .captures_iter(row)
                 .filter_map(|cap| cap.get(1))
                 .map(|m| Self::strip_tags(m.as_str()).replace(',', ""))
                 .collect();
 
             if !header_found {
                 let row_str = cells.join("").to_lowercase();
-                if row_str.contains("time") || row_str.contains("type") || row_str.contains("volume") {
+                if row_str.contains("time")
+                    || row_str.contains("type")
+                    || row_str.contains("volume")
+                {
                     header_found = true;
                     for (i, h) in cells.iter().enumerate() {
                         let h_lower = h.to_lowercase().trim().to_string();
-                        let deal_columns = ["time", "deal", "symbol", "type", "entry", "volume", "price", "order", "commission", "swap", "profit", "balance", "comment"];
+                        let deal_columns = [
+                            "time",
+                            "deal",
+                            "symbol",
+                            "type",
+                            "entry",
+                            "volume",
+                            "price",
+                            "order",
+                            "commission",
+                            "swap",
+                            "profit",
+                            "balance",
+                            "comment",
+                        ];
                         for col in &deal_columns {
                             if h_lower.contains(col) || col.contains(&h_lower) {
                                 col_map.insert(i, col.to_string());
@@ -225,13 +256,31 @@ impl ReportExtractor {
                     symbol: deal_map.get("symbol").cloned().unwrap_or_default(),
                     deal_type: deal_map.get("type").cloned().unwrap_or_default(),
                     entry: deal_map.get("entry").cloned().unwrap_or_default(),
-                    volume: deal_map.get("volume").and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    price: deal_map.get("price").and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                    volume: deal_map
+                        .get("volume")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
+                    price: deal_map
+                        .get("price")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
                     order: deal_map.get("order").cloned().unwrap_or_default(),
-                    commission: deal_map.get("commission").and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    swap: deal_map.get("swap").and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    profit: deal_map.get("profit").and_then(|s| s.parse().ok()).unwrap_or(0.0),
-                    balance: deal_map.get("balance").and_then(|s| s.parse().ok()).unwrap_or(0.0),
+                    commission: deal_map
+                        .get("commission")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
+                    swap: deal_map
+                        .get("swap")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
+                    profit: deal_map
+                        .get("profit")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
+                    balance: deal_map
+                        .get("balance")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0),
                     comment: deal_map.get("comment").cloned().unwrap_or_default(),
                     magic: deal_map.get("magic").cloned(),
                 };
@@ -251,10 +300,15 @@ impl ReportExtractor {
 
     fn write_deals_csv(&self, deals: &[Deal], path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
-        writeln!(file, "time,deal,symbol,type,entry,volume,price,order,commission,swap,profit,balance,comment")?;
-        
+        writeln!(
+            file,
+            "time,deal,symbol,type,entry,volume,price,order,commission,swap,profit,balance,comment"
+        )?;
+
         for deal in deals {
-            writeln!(file, "{},{},{},{},{},{},{},{},{},{},{},{},\"{}\"",
+            writeln!(
+                file,
+                "{},{},{},{},{},{},{},{},{},{},{},{},\"{}\"",
                 deal.time,
                 deal.deal,
                 deal.symbol,
@@ -270,28 +324,28 @@ impl ReportExtractor {
                 deal.comment.replace('"', "\"\"")
             )?;
         }
-        
+
         Ok(())
     }
 
     fn read_text(path: &str) -> Result<String> {
         let raw = fs::read(path)?;
-        
+
         if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) {
             // UTF-16 BOM
             let text = String::from_utf16_lossy(
                 raw.chunks_exact(2)
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect::<Vec<_>>()
-                    .as_slice()
+                    .as_slice(),
             );
             return Ok(text);
         }
-        
+
         if let Ok(text) = String::from_utf8(raw.clone()) {
             return Ok(text);
         }
-        
+
         Ok(String::from_utf8_lossy(&raw).to_string())
     }
 

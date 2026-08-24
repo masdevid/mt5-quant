@@ -1,19 +1,23 @@
+use crate::models::Config;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
-use crate::models::Config;
 
 // ── Update helpers ────────────────────────────────────────────────────────────
 
 fn platform_tag() -> &'static str {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))] return "macos-aarch64";
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]  return "macos-x86_64";
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]  return "linux-x86_64";
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "macos-aarch64";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "macos-x86_64";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "linux-x86_64";
     #[cfg(not(any(
         all(target_os = "macos", target_arch = "aarch64"),
         all(target_os = "macos", target_arch = "x86_64"),
         all(target_os = "linux", target_arch = "x86_64"),
-    )))] return "unsupported";
+    )))]
+    return "unsupported";
 }
 
 fn semver_newer(latest: &str, current: &str) -> bool {
@@ -32,16 +36,22 @@ fn semver_newer(latest: &str, current: &str) -> bool {
 pub(super) async fn fetch_latest_version() -> Option<String> {
     let output = tokio::process::Command::new("curl")
         .args([
-            "-sf", "--max-time", "5",
-            "-H", "Accept: application/vnd.github.v3+json",
-            "-H", "User-Agent: mt5-quant-updater",
+            "-sf",
+            "--max-time",
+            "5",
+            "-H",
+            "Accept: application/vnd.github.v3+json",
+            "-H",
+            "User-Agent: mt5-quant-updater",
             "https://api.github.com/repos/masdevid/mt5-quant/releases/latest",
         ])
         .output()
         .await
         .ok()?;
 
-    if !output.status.success() { return None; }
+    if !output.status.success() {
+        return None;
+    }
 
     let body: Value = serde_json::from_slice(&output.stdout).ok()?;
     body.get("tag_name")
@@ -96,9 +106,11 @@ pub async fn handle_update(_config: &Config) -> Result<Value> {
         Some(v) => v.to_string(),
         None => match fetch_latest_version().await {
             Some(v) => v,
-            None => return Ok(err_response(
-                r#"{"success":false,"error":"Could not determine latest version — check network"}"#
-            )),
+            None => {
+                return Ok(err_response(
+                    r#"{"success":false,"error":"Could not determine latest version — check network"}"#,
+                ))
+            }
         },
     };
 
@@ -112,7 +124,7 @@ pub async fn handle_update(_config: &Config) -> Result<Value> {
     let tag = platform_tag();
     if tag == "unsupported" {
         return Ok(err_response(
-            r#"{"success":false,"error":"Auto-update not supported on this platform — build from source"}"#
+            r#"{"success":false,"error":"Auto-update not supported on this platform — build from source"}"#,
         ));
     }
 
@@ -123,34 +135,48 @@ pub async fn handle_update(_config: &Config) -> Result<Value> {
     // Download tarball to a temp file
     let tmp_tar = tempfile::NamedTempFile::new()?;
     let dl = tokio::process::Command::new("curl")
-        .args(["-sfL", "--max-time", "120",
-               "-o", tmp_tar.path().to_str().unwrap_or_default(),
-               &url])
+        .args([
+            "-sfL",
+            "--max-time",
+            "120",
+            "-o",
+            tmp_tar.path().to_str().unwrap_or_default(),
+            &url,
+        ])
         .status()
         .await?;
 
     if !dl.success() {
         return Ok(err_response(format!(
-            r#"{{"success":false,"error":"Download failed","url":"{}"}}"#, url
+            r#"{{"success":false,"error":"Download failed","url":"{}"}}"#,
+            url
         )));
     }
 
     // Extract binary (tarball root dir is mcp-mt5-quant-{platform}/)
     let tmp_dir = tempfile::tempdir()?;
     let extract = tokio::process::Command::new("tar")
-        .args(["-xzf", tmp_tar.path().to_str().unwrap_or_default(),
-               "-C", tmp_dir.path().to_str().unwrap_or_default(),
-               "--strip-components=1"])
+        .args([
+            "-xzf",
+            tmp_tar.path().to_str().unwrap_or_default(),
+            "-C",
+            tmp_dir.path().to_str().unwrap_or_default(),
+            "--strip-components=1",
+        ])
         .status()
         .await?;
 
     if !extract.success() {
-        return Ok(err_response(r#"{"success":false,"error":"Failed to extract archive"}"#));
+        return Ok(err_response(
+            r#"{"success":false,"error":"Failed to extract archive"}"#,
+        ));
     }
 
     let new_bin = tmp_dir.path().join("mt5-quant");
     if !new_bin.exists() {
-        return Ok(err_response(r#"{"success":false,"error":"Binary not found in archive"}"#));
+        return Ok(err_response(
+            r#"{"success":false,"error":"Binary not found in archive"}"#,
+        ));
     }
 
     // Atomic replace: write to sibling .tmp, then rename (safe on same FS)
@@ -180,42 +206,72 @@ pub async fn handle_verify_setup(config: &Config) -> Result<Value> {
     let mut all_ok = true;
 
     let config_path = Config::writable_config_path();
-    checks.insert("config_file".into(), json!({
-        "ok": config_path.exists(),
-        "path": config_path.to_string_lossy()
-    }));
+    checks.insert(
+        "config_file".into(),
+        json!({
+            "ok": config_path.exists(),
+            "path": config_path.to_string_lossy()
+        }),
+    );
 
     let check = |v: &Option<String>, is_dir: bool| -> Value {
         match v {
             None => json!({ "ok": false, "detail": "not set" }),
             Some(p) => {
-                let ok = if is_dir { Path::new(p).is_dir() } else { Path::new(p).exists() };
+                let ok = if is_dir {
+                    Path::new(p).is_dir()
+                } else {
+                    Path::new(p).exists()
+                };
                 json!({ "ok": ok, "detail": p })
             }
         }
     };
 
-    let wine_ok = config.wine_executable.as_ref()
-        .map(|p| Path::new(p).exists()).unwrap_or(false);
-    let term_ok = config.terminal_dir.as_ref()
-        .map(|p| Path::new(p).is_dir()).unwrap_or(false);
+    let wine_ok = config
+        .wine_executable
+        .as_ref()
+        .map(|p| Path::new(p).exists())
+        .unwrap_or(false);
+    let term_ok = config
+        .terminal_dir
+        .as_ref()
+        .map(|p| Path::new(p).is_dir())
+        .unwrap_or(false);
 
-    if !wine_ok || !term_ok { all_ok = false; }
+    if !wine_ok || !term_ok {
+        all_ok = false;
+    }
 
-    checks.insert("wine_executable".into(), check(&config.wine_executable, false));
+    checks.insert(
+        "wine_executable".into(),
+        check(&config.wine_executable, false),
+    );
     checks.insert("terminal_dir".into(), check(&config.terminal_dir, true));
     checks.insert("experts_dir".into(), check(&config.experts_dir, true));
     checks.insert("indicators_dir".into(), check(&config.indicators_dir, true));
     checks.insert("scripts_dir".into(), check(&config.scripts_dir, true));
-    checks.insert("tester_profiles_dir".into(), check(&config.tester_profiles_dir, true));
+    checks.insert(
+        "tester_profiles_dir".into(),
+        check(&config.tester_profiles_dir, true),
+    );
     checks.insert("display_mode".into(), json!(config.display_mode));
-    checks.insert("reports_dir".into(), json!(config.reports_dir().to_string_lossy().to_string()));
-    checks.insert("db_path".into(), json!(Config::db_path().to_string_lossy().to_string()));
+    checks.insert(
+        "reports_dir".into(),
+        json!(config.reports_dir().to_string_lossy().to_string()),
+    );
+    checks.insert(
+        "db_path".into(),
+        json!(Config::db_path().to_string_lossy().to_string()),
+    );
 
     let hint = if all_ok {
         "Environment fully configured and ready".into()
     } else if !config_path.exists() {
-        format!("Auto-discovery will run on next request. Config will be written to {}", config_path.display())
+        format!(
+            "Auto-discovery will run on next request. Config will be written to {}",
+            config_path.display()
+        )
     } else {
         format!("Fix missing paths in {}", config_path.display())
     };
@@ -235,13 +291,13 @@ pub async fn handle_list_symbols(config: &Config) -> Result<Value> {
     // Get active account info
     let current_account = config.current_account();
     let active_server = current_account.as_ref().map(|a| a.server.clone());
-    
+
     // Get all available servers for reference
     let all_servers = config.available_servers();
-    
+
     // Get symbols for active server (or all if no active account)
     let symbols = config.discover_symbols_for_active_account();
-    
+
     let hint = if symbols.is_empty() {
         if active_server.is_some() {
             "No history data found for the active account's server. Open MT5 and download tick data for the symbols you want to backtest."
@@ -251,7 +307,7 @@ pub async fn handle_list_symbols(config: &Config) -> Result<Value> {
     } else {
         "These symbols have local tick history and can be used for backtesting."
     };
-    
+
     Ok(json!({
         "content": [{ "type": "text", "text": json!({
             "success": true,
@@ -273,16 +329,16 @@ pub async fn handle_list_symbols(config: &Config) -> Result<Value> {
 pub async fn handle_get_active_account(config: &Config) -> Result<Value> {
     let current_account = config.current_account();
     let active_server = current_account.as_ref().map(|a| a.server.clone());
-    
+
     // Get all available servers
     let all_servers = config.available_servers();
-    
+
     // Get symbols for active server (or all if no active account)
     let symbols = config.discover_symbols_for_active_account();
-    
+
     // Determine readiness for backtesting
     let ready_for_backtest = current_account.is_some() && !symbols.is_empty();
-    
+
     let hint = if current_account.is_none() {
         "No active MT5 account detected. Open MT5 and login to an account first."
     } else if symbols.is_empty() {
@@ -290,7 +346,7 @@ pub async fn handle_get_active_account(config: &Config) -> Result<Value> {
     } else {
         "Ready for backtesting. Use these symbols with run_backtest."
     };
-    
+
     Ok(json!({
         "content": [{ "type": "text", "text": json!({
             "success": true,
@@ -334,14 +390,17 @@ struct ConfigStatus {
 }
 
 pub async fn handle_healthcheck(config: &Config, args: &Value) -> Result<Value> {
-    let detailed = args.get("detailed").and_then(|v| v.as_bool()).unwrap_or(false);
-    
+    let detailed = args
+        .get("detailed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let os_info = detect_os();
     let config_status = validate_configuration(config).await;
-    
+
     let mut healthy = true;
     let mut issues = Vec::new();
-    
+
     if !config_status.config_exists {
         healthy = false;
         issues.push("Configuration file not found - run setup to configure");
@@ -354,7 +413,7 @@ pub async fn handle_healthcheck(config: &Config, args: &Value) -> Result<Value> 
         healthy = false;
         issues.push("MT5 directory not found - check installation");
     }
-    
+
     let mut response = json!({
         "success": true,
         "healthy": healthy,
@@ -380,7 +439,7 @@ pub async fn handle_healthcheck(config: &Config, args: &Value) -> Result<Value> 
         },
         "issues": issues,
     });
-    
+
     if detailed {
         response["detailed"] = json!({
             "rust_version": get_rust_version(),
@@ -397,7 +456,7 @@ pub async fn handle_healthcheck(config: &Config, args: &Value) -> Result<Value> 
             },
         });
     }
-    
+
     Ok(json!({
         "content": [{ "type": "text", "text": response.to_string() }],
         "isError": false
@@ -407,10 +466,10 @@ pub async fn handle_healthcheck(config: &Config, args: &Value) -> Result<Value> 
 fn detect_os() -> OsInfo {
     let platform = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
-    
+
     let is_macos = platform == "macos";
     let is_linux = platform == "linux";
-    
+
     let name = if is_macos {
         get_macos_version().unwrap_or_else(|| "macOS".to_string())
     } else if is_linux {
@@ -418,7 +477,7 @@ fn detect_os() -> OsInfo {
     } else {
         platform.clone()
     };
-    
+
     OsInfo {
         platform,
         arch,
@@ -441,7 +500,8 @@ fn get_linux_distro() -> Option<String> {
     std::fs::read_to_string("/etc/os-release")
         .ok()
         .and_then(|content| {
-            content.lines()
+            content
+                .lines()
                 .find(|l| l.starts_with("PRETTY_NAME="))
                 .map(|l| l.replace("PRETTY_NAME=", "").trim_matches('"').to_string())
         })
@@ -459,33 +519,45 @@ fn get_rust_version() -> Option<String> {
 async fn validate_configuration(config: &Config) -> ConfigStatus {
     let config_path = Config::writable_config_path();
     let config_exists = config_path.exists();
-    
-    let wine_found = config.wine_executable.as_ref()
+
+    let wine_found = config
+        .wine_executable
+        .as_ref()
         .map(|p| Path::new(p).exists())
         .unwrap_or(false);
     let wine_path = config.wine_executable.clone();
-    
-    let mt5_dir_found = config.terminal_dir.as_ref()
+
+    let mt5_dir_found = config
+        .terminal_dir
+        .as_ref()
         .map(|p| Path::new(p).is_dir())
         .unwrap_or(false);
     let mt5_dir = config.terminal_dir.clone();
-    
-    let experts_dir_found = config.experts_dir.as_ref()
+
+    let experts_dir_found = config
+        .experts_dir
+        .as_ref()
         .map(|p| Path::new(p).is_dir())
         .unwrap_or(false);
-    
-    let indicators_dir_found = config.indicators_dir.as_ref()
+
+    let indicators_dir_found = config
+        .indicators_dir
+        .as_ref()
         .map(|p| Path::new(p).is_dir())
         .unwrap_or(false);
-    
-    let scripts_dir_found = config.scripts_dir.as_ref()
+
+    let scripts_dir_found = config
+        .scripts_dir
+        .as_ref()
         .map(|p| Path::new(p).is_dir())
         .unwrap_or(false);
-    
-    let tester_profiles_found = config.tester_profiles_dir.as_ref()
+
+    let tester_profiles_found = config
+        .tester_profiles_dir
+        .as_ref()
         .map(|p| Path::new(p).is_dir())
         .unwrap_or(false);
-    
+
     ConfigStatus {
         config_exists,
         config_path: config_path.to_string_lossy().to_string(),

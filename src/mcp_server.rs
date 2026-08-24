@@ -2,7 +2,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::{models::Config as ModelsConfig, tools::ToolHandler, McpError, McpRequest, McpResponse};
+use crate::{
+    models::Config as ModelsConfig, tools::ToolHandler, McpError, McpRequest, McpResponse,
+};
 
 #[allow(dead_code)]
 type NotificationCallback = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
@@ -43,7 +45,7 @@ impl McpServer {
     pub async fn set_notification_sender(&self, tx: mpsc::UnboundedSender<Notification>) {
         let mut guard = self.notification_tx.lock().await;
         *guard = Some(tx.clone());
-        
+
         // Update tool handler with notification callback
         let tx_clone = tx.clone();
         let callback = Arc::new(move |method: &str, params: serde_json::Value| {
@@ -52,10 +54,10 @@ impl McpServer {
                 params,
             });
         });
-        
+
         let config = ModelsConfig::load().unwrap_or_default();
         let new_handler = ToolHandler::with_notification_callback(config, callback);
-        
+
         let mut handler_guard = self.tool_handler.lock().await;
         *handler_guard = Some(new_handler);
     }
@@ -69,42 +71,47 @@ impl McpServer {
     /// Run verify_setup in background - non blocking
     fn spawn_auto_verify(&self) {
         let result_arc = self.auto_verify_result.clone();
-        
+
         tokio::spawn(async move {
             // Get config
             let config = ModelsConfig::load().unwrap_or_default();
             let config_path = ModelsConfig::writable_config_path();
-            
+
             // Quick async file checks
             let config_exists = tokio::task::spawn_blocking({
                 let path = config_path.clone();
                 move || path.exists()
-            }).await.unwrap_or(false);
-            
+            })
+            .await
+            .unwrap_or(false);
+
             let wine_ok = if let Some(wine) = &config.wine_executable {
                 let wine = wine.clone();
-                tokio::task::spawn_blocking(move || {
-                    std::path::Path::new(&wine).exists()
-                }).await.unwrap_or(false)
+                tokio::task::spawn_blocking(move || std::path::Path::new(&wine).exists())
+                    .await
+                    .unwrap_or(false)
             } else {
                 false
             };
-            
+
             let term_ok = if let Some(term) = &config.terminal_dir {
                 let term = term.clone();
-                tokio::task::spawn_blocking(move || {
-                    std::path::Path::new(&term).is_dir()
-                }).await.unwrap_or(false)
+                tokio::task::spawn_blocking(move || std::path::Path::new(&term).is_dir())
+                    .await
+                    .unwrap_or(false)
             } else {
                 false
             };
-            
+
             let all_ok = config_exists && wine_ok && term_ok;
-            
+
             let hint = if all_ok {
                 "Environment fully configured and ready".to_string()
             } else if !config_exists {
-                format!("Auto-discovery will run on first request. Config will be written to {}", config_path.display())
+                format!(
+                    "Auto-discovery will run on first request. Config will be written to {}",
+                    config_path.display()
+                )
             } else if !wine_ok {
                 "Wine/CrossOver not found - required for MT5 execution".to_string()
             } else if !term_ok {
@@ -112,19 +119,19 @@ impl McpServer {
             } else {
                 "Fix missing paths in config".to_string()
             };
-            
+
             let result = AutoVerifyResult {
                 all_ok,
                 hint,
                 config_path: config_path.to_string_lossy().to_string(),
             };
-            
+
             // Store result
             let mut guard = result_arc.lock().await;
             *guard = Some(result);
         });
     }
-    
+
     /// Get current verify status (may be loading if called immediately after init)
     #[allow(dead_code)]
     async fn get_verify_status(&self) -> (Option<bool>, String) {
@@ -150,24 +157,15 @@ impl McpServer {
     pub async fn handle_request(&self, request: McpRequest) -> McpResponse {
         match request.method.as_str() {
             "initialize" => {
-                // Protocol version negotiation: client sends desired version
-                let client_version = request.params.as_ref()
-                    .and_then(|p| p.get("protocolVersion"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("2024-11-05");
-                
-                // Server selects version (latest supported that client also supports)
-                let negotiated_version = if client_version.starts_with("2025-") {
-                    "2024-11-05" // Fall back to stable version
-                } else {
-                    "2024-11-05"
-                };
-                
+                // Protocol version negotiation: server selects the stable protocol
+                // version regardless of which version the client requests.
+                let negotiated_version = "2024-11-05";
+
                 // Start background verify (non-blocking)
                 self.spawn_auto_verify();
-                
+
                 *self.initialized.lock().await = true;
-                
+
                 // Return immediately with fast status
                 let server_info = json!({
                     "name": "MT5-Quant",
@@ -176,7 +174,7 @@ impl McpServer {
                         "hint": "Auto-verification running... Use verify_setup tool for detailed status",
                     }
                 });
-                
+
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
@@ -202,12 +200,13 @@ impl McpServer {
                         result: None,
                         error: Some(McpError {
                             code: -32600,
-                            message: "Received request before initialization was complete".to_string(),
+                            message: "Received request before initialization was complete"
+                                .to_string(),
                             data: None,
                         }),
                     };
                 }
-                
+
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
@@ -224,16 +223,17 @@ impl McpServer {
                         result: None,
                         error: Some(McpError {
                             code: -32600,
-                            message: "Received request before initialization was complete".to_string(),
+                            message: "Received request before initialization was complete"
+                                .to_string(),
                             data: None,
                         }),
                     };
                 }
-                
+
                 if let Some(params) = request.params {
                     if let (Some(tool_name), Some(arguments)) = (
                         params.get("name").and_then(|v| v.as_str()),
-                        params.get("arguments")
+                        params.get("arguments"),
                     ) {
                         let result = self.handle_tool_call(tool_name, arguments).await;
                         McpResponse {
@@ -267,18 +267,16 @@ impl McpServer {
                     }
                 }
             }
-            _ => {
-                McpResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: request.id,
-                    result: None,
-                    error: Some(McpError {
-                        code: -32601,
-                        message: format!("Method not found: {}", request.method),
-                        data: None,
-                    }),
-                }
-            }
+            _ => McpResponse {
+                jsonrpc: "2.0".to_string(),
+                id: request.id,
+                result: None,
+                error: Some(McpError {
+                    code: -32601,
+                    message: format!("Method not found: {}", request.method),
+                    data: None,
+                }),
+            },
         }
     }
 
@@ -286,24 +284,24 @@ impl McpServer {
         let handler_guard = self.tool_handler.lock().await;
         let handler = handler_guard.as_ref().cloned();
         drop(handler_guard);
-        
+
         match handler {
-            Some(h) => {
-                h.handle(tool_name, arguments).await.unwrap_or_else(|e| json!({
+            Some(h) => h.handle(tool_name, arguments).await.unwrap_or_else(|e| {
+                json!({
                     "content": [{
                         "type": "text",
                         "text": format!("Tool execution failed: {}", e)
                     }],
                     "isError": true
-                }))
-            }
+                })
+            }),
             None => json!({
                 "content": [{
                     "type": "text",
                     "text": "Tool handler not initialized"
                 }],
                 "isError": true
-            })
+            }),
         }
     }
 }

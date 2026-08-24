@@ -1,21 +1,49 @@
+use crate::compile::MqlCompiler;
+use crate::models::Config;
 use anyhow::Result;
 use serde_json::{json, Value};
 use walkdir::WalkDir;
-use crate::compile::MqlCompiler;
-use crate::models::Config;
 
 const BUILTIN_INDICATORS: &[&str] = &[
-    "Accelerator", "Accumulation", "ADX", "Alligator", "AO", "ATR",
-    "Bands", "Bears", "Bulls", "CCI", "DeMarker", "Envelopes", "Force",
-    "Fractals", "Gator", "Ichimoku", "MA", "MACD", "MFI", "Momentum",
-    "OBV", "OsMA", "RSI", "RVI", "SAR", "StdDev", "Stochastic", "WPR",
+    "Accelerator",
+    "Accumulation",
+    "ADX",
+    "Alligator",
+    "AO",
+    "ATR",
+    "Bands",
+    "Bears",
+    "Bulls",
+    "CCI",
+    "DeMarker",
+    "Envelopes",
+    "Force",
+    "Fractals",
+    "Gator",
+    "Ichimoku",
+    "MA",
+    "MACD",
+    "MFI",
+    "Momentum",
+    "OBV",
+    "OsMA",
+    "RSI",
+    "RVI",
+    "SAR",
+    "StdDev",
+    "Stochastic",
+    "WPR",
 ];
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /// Walk a MQL directory and return file entries matching an optional filter.
 /// `type_label` is included as a `"type"` field when provided (e.g. "custom").
-fn scan_mql_dir(dir: Option<&String>, filter: Option<&str>, type_label: Option<&str>) -> Vec<Value> {
+fn scan_mql_dir(
+    dir: Option<&String>,
+    filter: Option<&str>,
+    type_label: Option<&str>,
+) -> Vec<Value> {
     let Some(dir) = dir else { return Vec::new() };
     let filter_lower = filter.map(|f| f.to_lowercase());
 
@@ -68,13 +96,16 @@ fn err_response(msg: impl std::fmt::Display) -> Value {
 fn copy_mql_to_project(config: &Config, args: &Value, default_fallback: &str) -> Result<Value> {
     use std::path::PathBuf;
 
-    let source_path = args.get("source_path")
+    let source_path = args
+        .get("source_path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("source_path is required"))?;
 
     let target_name = args.get("target_name").and_then(|v| v.as_str());
 
-    let project_dir = config.project_dir.as_ref()
+    let project_dir = config
+        .project_dir
+        .as_ref()
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("Cannot determine project directory"))?;
@@ -89,7 +120,8 @@ fn copy_mql_to_project(config: &Config, args: &Value, default_fallback: &str) ->
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("mq5");
     let target_filename = match target_name {
         Some(name) => format!("{}.{}", name, ext),
-        None => source.file_name()
+        None => source
+            .file_name()
             .and_then(|n| n.to_str())
             .map(|n| n.to_string())
             .unwrap_or_else(|| format!("{}.{}", default_fallback, ext)),
@@ -105,7 +137,10 @@ fn copy_mql_to_project(config: &Config, args: &Value, default_fallback: &str) ->
             "bytes_copied": bytes,
         }))),
         Err(e) => Ok(err_response(
-            serde_json::to_string(&json!({ "success": false, "error": format!("Failed to copy file: {}", e) })).unwrap_or_default()
+            serde_json::to_string(
+                &json!({ "success": false, "error": format!("Failed to copy file: {}", e) }),
+            )
+            .unwrap_or_default(),
         )),
     }
 }
@@ -123,7 +158,8 @@ pub async fn handle_list_experts(config: &Config, args: &Value) -> Result<Value>
 }
 
 pub async fn handle_search_experts(config: &Config, args: &Value) -> Result<Value> {
-    let pattern = args.get("pattern")
+    let pattern = args
+        .get("pattern")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
     let matches = scan_mql_dir(config.experts_dir.as_ref(), Some(pattern), None);
@@ -137,15 +173,24 @@ pub async fn handle_search_experts(config: &Config, args: &Value) -> Result<Valu
 
 pub async fn handle_list_indicators(config: &Config, args: &Value) -> Result<Value> {
     let filter = args.get("filter").and_then(|v| v.as_str());
-    let include_builtin = args.get("include_builtin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_builtin = args
+        .get("include_builtin")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let mut indicators = scan_mql_dir(config.indicators_dir.as_ref(), filter, Some("custom"));
 
     if include_builtin {
         let filter_lower = filter.map(|f| f.to_lowercase());
         for &name in BUILTIN_INDICATORS {
-            if filter_lower.as_ref().map(|f| name.to_lowercase().contains(f.as_str())).unwrap_or(true) {
-                indicators.push(json!({ "name": name, "compiled": true, "type": "builtin", "path": null }));
+            if filter_lower
+                .as_ref()
+                .map(|f| name.to_lowercase().contains(f.as_str()))
+                .unwrap_or(true)
+            {
+                indicators.push(
+                    json!({ "name": name, "compiled": true, "type": "builtin", "path": null }),
+                );
             }
         }
         indicators.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
@@ -171,18 +216,28 @@ pub async fn handle_list_scripts(config: &Config, args: &Value) -> Result<Value>
 }
 
 pub async fn handle_search_indicators(config: &Config, args: &Value) -> Result<Value> {
-    let pattern = args.get("pattern")
+    let pattern = args
+        .get("pattern")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
-    let include_builtin = args.get("include_builtin").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_builtin = args
+        .get("include_builtin")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    let mut matches = scan_mql_dir(config.indicators_dir.as_ref(), Some(pattern), Some("custom"));
+    let mut matches = scan_mql_dir(
+        config.indicators_dir.as_ref(),
+        Some(pattern),
+        Some("custom"),
+    );
 
     if include_builtin {
         let pattern_lower = pattern.to_lowercase();
         for &name in BUILTIN_INDICATORS {
             if name.to_lowercase().contains(&pattern_lower) {
-                matches.push(json!({ "name": name, "path": null, "type": "builtin", "compiled": true }));
+                matches.push(
+                    json!({ "name": name, "path": null, "type": "builtin", "compiled": true }),
+                );
             }
         }
         matches.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
@@ -197,7 +252,8 @@ pub async fn handle_search_indicators(config: &Config, args: &Value) -> Result<V
 }
 
 pub async fn handle_search_scripts(config: &Config, args: &Value) -> Result<Value> {
-    let pattern = args.get("pattern")
+    let pattern = args
+        .get("pattern")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("pattern is required"))?;
     let matches = scan_mql_dir(config.scripts_dir.as_ref(), Some(pattern), None);
@@ -217,7 +273,11 @@ pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
     } else if let Some(name) = args.get("expert").and_then(|v| v.as_str()) {
         let mut candidates = vec![PathBuf::from(name).with_extension("mq5")];
         if let Some(experts_dir) = &config.experts_dir {
-            candidates.push(PathBuf::from(experts_dir).join(name).join(format!("{}.mq5", name)));
+            candidates.push(
+                PathBuf::from(experts_dir)
+                    .join(name)
+                    .join(format!("{}.mq5", name)),
+            );
             candidates.push(PathBuf::from(experts_dir).join(format!("{}.mq5", name)));
         }
         match candidates.into_iter().find(|p| p.exists()) {
@@ -230,7 +290,9 @@ pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
             )),
         }
     } else {
-        return Err(anyhow::anyhow!("Either 'expert' or 'expert_path' is required"));
+        return Err(anyhow::anyhow!(
+            "Either 'expert' or 'expert_path' is required"
+        ));
     };
 
     let compiler = MqlCompiler::new(config.clone());
@@ -249,7 +311,10 @@ pub async fn handle_compile_ea(config: &Config, args: &Value) -> Result<Value> {
             "isError": !result.success
         })),
         Err(e) => Ok(err_response(
-            serde_json::to_string(&json!({ "success": false, "error": format!("Compilation failed: {}", e) })).unwrap_or_default()
+            serde_json::to_string(
+                &json!({ "success": false, "error": format!("Compilation failed: {}", e) }),
+            )
+            .unwrap_or_default(),
         )),
     }
 }

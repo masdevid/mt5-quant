@@ -11,7 +11,7 @@ use crate::optimization::OptimizationParser;
 /// MT5 .set and .ini files are typically UTF-16LE with BOM (0xFF 0xFE).
 fn read_file_as_utf8(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
-    
+
     // Check for UTF-16LE BOM (0xFF 0xFE)
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         // UTF-16LE with BOM - skip the 2-byte BOM and decode
@@ -19,12 +19,10 @@ fn read_file_as_utf8(path: &Path) -> Result<String> {
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
-        String::from_utf16(&utf16_data)
-            .map_err(|e| anyhow!("Failed to decode UTF-16LE: {}", e))
+        String::from_utf16(&utf16_data).map_err(|e| anyhow!("Failed to decode UTF-16LE: {}", e))
     } else {
         // Try UTF-8
-        String::from_utf8(bytes)
-            .map_err(|e| anyhow!("Failed to decode as UTF-8: {}", e))
+        String::from_utf8(bytes).map_err(|e| anyhow!("Failed to decode as UTF-8: {}", e))
     }
 }
 
@@ -106,38 +104,57 @@ impl OptimizationRunner {
         let log_file = PathBuf::from(format!("/tmp/mt5opt_{}.log", timestamp));
 
         // Calculate agent count: 75% of available CPUs, or configured value
-        let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let cpu_count = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         let default_agents = ((cpu_count as f64 * 0.75).ceil() as u32).max(1);
         let max_agents = self.config.opt_max_agents.unwrap_or(default_agents).max(1);
 
         // Count combinations
-        let combinations = self.count_combinations(&params.set_file)
+        let combinations = self
+            .count_combinations(&params.set_file)
             .map_err(|e| anyhow!("count_combinations failed: {}", e))?;
 
         // Get paths
-        let mt5_dir = self.config.terminal_dir.as_ref()
+        let mt5_dir = self
+            .config
+            .terminal_dir
+            .as_ref()
             .ok_or_else(|| anyhow!("terminal_dir not configured"))?;
-        let wine_exe = self.config.wine_executable.as_ref()
+        let wine_exe = self
+            .config
+            .wine_executable
+            .as_ref()
             .ok_or_else(|| anyhow!("wine_executable not configured"))?;
-        
+
         // Resolve the .set filename MT5 will actually load: basename of set_file,
         // else "{expert}.set". Must match the name told to MT5 below (ExpertParameters).
-        let set_param = if !params.set_file.is_empty() && params.set_file != format!("{}.set", params.expert) {
-            std::path::Path::new(&params.set_file).file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&format!("{}.set", params.expert))
-                .to_string()
-        } else {
-            format!("{}.set", params.expert)
-        };
+        let set_param =
+            if !params.set_file.is_empty() && params.set_file != format!("{}.set", params.expert) {
+                std::path::Path::new(&params.set_file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&format!("{}.set", params.expert))
+                    .to_string()
+            } else {
+                format!("{}.set", params.expert)
+            };
 
         // Write .set file as UTF-16LE with BOM directly to MT5 tester directory
         let wine_prefix_dir = self.get_wine_prefix_dir(mt5_dir)?;
-        let tester_dir = wine_prefix_dir.join("drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester");
-        fs::create_dir_all(&tester_dir).map_err(|e| anyhow!("create_dir_all({}) failed: {}", tester_dir.display(), e))?;
+        let tester_dir =
+            wine_prefix_dir.join("drive_c/Program Files/MetaTrader 5/MQL5/Profiles/Tester");
+        fs::create_dir_all(&tester_dir)
+            .map_err(|e| anyhow!("create_dir_all({}) failed: {}", tester_dir.display(), e))?;
         let dst_set_file = tester_dir.join(&set_param);
         self.write_utf16le_set(&params.set_file, &dst_set_file)
-            .map_err(|e| anyhow!("write_utf16le_set({}) failed: {}", dst_set_file.display(), e))?;
+            .map_err(|e| {
+                anyhow!(
+                    "write_utf16le_set({}) failed: {}",
+                    dst_set_file.display(),
+                    e
+                )
+            })?;
 
         // Reset OptMode in terminal.ini
         // Patch terminal.ini [Tester] section with optimization params (primary mechanism)
@@ -152,7 +169,9 @@ impl OptimizationRunner {
             String::new()
         };
         let expert_path = if let Some(experts_dir) = &self.config.experts_dir {
-            let nested = Path::new(experts_dir).join(&params.expert).join(format!("{}.mq5", params.expert));
+            let nested = Path::new(experts_dir)
+                .join(&params.expert)
+                .join(format!("{}.mq5", params.expert));
             if nested.exists() {
                 format!("Experts\\{}\\{}.ex5", params.expert, params.expert)
             } else {
@@ -181,9 +200,16 @@ impl OptimizationRunner {
                Visual=0\n\
                Report=..\\..\\mt5mcp_opt_report.htm\n\
                ReplaceReport=1\n\
-                ShutdownTerminal=1",
-            expert_path, set_param, params.symbol, max_agents,
-            params.from_date, params.to_date, params.deposit, params.currency, params.leverage,
+                 ShutdownTerminal=1",
+            expert_path,
+            set_param,
+            params.symbol,
+            max_agents,
+            params.from_date,
+            params.to_date,
+            params.deposit,
+            params.currency,
+            params.leverage,
         );
         if let Some(mp) = params.max_passes {
             tester_section.push_str(&format!("\nMaxPass={}", mp));
@@ -209,7 +235,7 @@ impl OptimizationRunner {
                 if let Some(password) = &self.config.backtest_password {
                     opt_ini.push_str(&format!("Password={}\n", password));
                 }
-                opt_ini.push_str("\n");
+                opt_ini.push('\n');
             }
         }
         opt_ini.push_str("[Tester]\n");
@@ -243,12 +269,18 @@ impl OptimizationRunner {
             .parent()
             .and_then(|p| p.parent())
             .ok_or_else(|| anyhow!("Cannot derive Wine root from wine_exe"))?;
-        let ext_libs  = wine_root.join("lib").join("external");
+        let ext_libs = wine_root.join("lib").join("external");
         let wine_libs = wine_root.join("lib");
-        let dyld = format!("{}:{}:/usr/lib:/usr/local/lib",
-            ext_libs.display(), wine_libs.display());
-        let terminal_host = wine_prefix_dir.join("drive_c")
-            .join("Program Files").join("MetaTrader 5").join("terminal64.exe");
+        let dyld = format!(
+            "{}:{}:/usr/lib:/usr/local/lib",
+            ext_libs.display(),
+            wine_libs.display()
+        );
+        let terminal_host = wine_prefix_dir
+            .join("drive_c")
+            .join("Program Files")
+            .join("MetaTrader 5")
+            .join("terminal64.exe");
 
         let script = format!(
             "#!/bin/sh\n\
@@ -282,7 +314,14 @@ impl OptimizationRunner {
         let pid = child.id();
 
         // Write job metadata
-        self.write_job_metadata(&job_id, pid, &params, &log_file, combinations, &wine_prefix_dir)?;
+        self.write_job_metadata(
+            &job_id,
+            pid,
+            &params,
+            &log_file,
+            combinations,
+            &wine_prefix_dir,
+        )?;
 
         Ok(OptimizationResult {
             success: true,
@@ -290,7 +329,10 @@ impl OptimizationRunner {
             pid,
             log_file,
             combinations,
-            message: format!("Optimization launched (pid: {}). Runs for 2-6 hours. Do NOT kill this process.", pid),
+            message: format!(
+                "Optimization launched (pid: {}). Runs for 2-6 hours. Do NOT kill this process.",
+                pid
+            ),
         })
     }
 
@@ -325,7 +367,7 @@ impl OptimizationRunner {
 
     fn write_utf16le_set(&self, src: &str, dst: &Path) -> Result<()> {
         let content = read_file_as_utf8(Path::new(src))?;
-        
+
         // Create parent directory if needed
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
@@ -344,11 +386,12 @@ impl OptimizationRunner {
         // Write UTF-16LE with BOM
         let mut utf16_content: Vec<u16> = vec![0xFEFF]; // BOM
         utf16_content.extend(content.encode_utf16());
-        
-        let bytes: Vec<u8> = utf16_content.iter()
+
+        let bytes: Vec<u8> = utf16_content
+            .iter()
             .flat_map(|&c| vec![(c & 0xFF) as u8, ((c >> 8) & 0xFF) as u8])
             .collect();
-        
+
         fs::write(dst, bytes)?;
 
         Ok(())
@@ -500,22 +543,37 @@ impl OptimizationRunner {
             match parser.parse_job(job_id) {
                 Ok(passes) if !passes.is_empty() => {
                     let mut sorted_by_pf = passes.clone();
-                    sorted_by_pf.sort_by(|a, b| b.profit_factor.partial_cmp(&a.profit_factor).unwrap());
+                    sorted_by_pf
+                        .sort_by(|a, b| b.profit_factor.partial_cmp(&a.profit_factor).unwrap());
                     let top10: Vec<_> = sorted_by_pf.into_iter().take(10).collect();
 
                     let best_pf = parser.find_best_pass(&passes, "profit_factor");
                     let best_profit = parser.find_best_pass(&passes, "profit");
 
-                    let m = result.as_object_mut()
+                    let m = result
+                        .as_object_mut()
                         .ok_or_else(|| anyhow!("result is not object"))?;
-                    m.insert("status".into(), serde_json::Value::String("completed".into()));
+                    m.insert(
+                        "status".into(),
+                        serde_json::Value::String("completed".into()),
+                    );
                     m.insert("total_passes".into(), serde_json::json!(passes.len()));
-                    m.insert("top_10".into(), serde_json::to_value(&top10).unwrap_or_default());
-                    m.insert("best_pf".into(), serde_json::to_value(best_pf).unwrap_or_default());
-                    m.insert("best_profit".into(), serde_json::to_value(best_profit).unwrap_or_default());
+                    m.insert(
+                        "top_10".into(),
+                        serde_json::to_value(&top10).unwrap_or_default(),
+                    );
+                    m.insert(
+                        "best_pf".into(),
+                        serde_json::to_value(best_pf).unwrap_or_default(),
+                    );
+                    m.insert(
+                        "best_profit".into(),
+                        serde_json::to_value(best_profit).unwrap_or_default(),
+                    );
                 }
                 _ => {
-                    let m = result.as_object_mut()
+                    let m = result
+                        .as_object_mut()
                         .ok_or_else(|| anyhow!("result is not object"))?;
                     m.insert("status".into(), serde_json::Value::String("stopped".into()));
                     m.insert("message".into(), serde_json::Value::String(
@@ -549,27 +607,26 @@ impl OptimizationRunner {
         let mut jobs = Vec::new();
 
         if jobs_dir.exists() {
-            for entry in fs::read_dir(jobs_dir)? {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
-                                let job_id = path.file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("unknown")
-                                    .to_string();
-                                
-                                let pid = meta.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                                let is_running = self.is_process_running(pid);
-                                
-                                jobs.push(serde_json::json!({
-                                    "job_id": job_id,
-                                    "expert": meta.get("expert"),
-                                    "status": if is_running { "running" } else { "stopped" },
-                                    "started_at": meta.get("started_at"),
-                                }));
-                            }
+            for entry in fs::read_dir(jobs_dir)?.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
+                            let job_id = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+
+                            let pid = meta.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let is_running = self.is_process_running(pid);
+
+                            jobs.push(serde_json::json!({
+                                "job_id": job_id,
+                                "expert": meta.get("expert"),
+                                "status": if is_running { "running" } else { "stopped" },
+                                "started_at": meta.get("started_at"),
+                            }));
                         }
                     }
                 }

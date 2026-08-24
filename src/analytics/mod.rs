@@ -1,5 +1,5 @@
-pub mod extract;
 pub mod analyze;
+pub mod extract;
 
-pub use extract::ReportExtractor;
 pub use analyze::DealAnalyzer;
+pub use extract::ReportExtractor;

@@ -33,7 +33,10 @@ fn test_sample_deals_csv_format() {
 
     // Check for expected columns in header
     let header = lines[0];
-    assert!(header.contains("Time") || header.contains("time"), "Header should contain Time column");
+    assert!(
+        header.contains("Time") || header.contains("time"),
+        "Header should contain Time column"
+    );
 }
 
 #[test]
@@ -42,8 +45,10 @@ fn test_sample_report_html_format() {
     let content = fs::read_to_string(path).expect("Should read sample_report.htm");
 
     // Check HTML structure
-    assert!(content.contains("<html") || content.contains("<table"),
-            "Report should contain HTML or table elements");
+    assert!(
+        content.contains("<html") || content.contains("<table"),
+        "Report should contain HTML or table elements"
+    );
 }
 
 #[test]
@@ -52,6 +57,8 @@ fn test_sample_report_xml_format() {
     let content = fs::read_to_string(path).expect("Should read sample_report.htm.xml");
 
     // Check XML structure
-    assert!(content.contains("<?xml") || content.contains("<Workbook"),
-            "Report should contain XML or Workbook elements");
+    assert!(
+        content.contains("<?xml") || content.contains("<Workbook"),
+        "Report should contain XML or Workbook elements"
+    );
 }

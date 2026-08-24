@@ -15,10 +15,10 @@ use std::io::{stdout, Write};
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::models::Config;
-use crate::pipeline::backtest::{BacktestPipeline, BacktestParams};
+use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
 
 #[derive(Parser)]
 #[command(name = "mt5-quant")]
@@ -27,19 +27,19 @@ struct Cli {
     /// Run as stdio MCP server (default)
     #[arg(short, long, default_value = "false")]
     stdio: bool,
-    
+
     /// Run on TCP port for debugging
     #[arg(short, long)]
     port: Option<u16>,
-    
+
     /// Test backtest launch performance (direct Rust call, not MCP)
     #[arg(long)]
     test_launch: bool,
-    
+
     /// EA name for test launch
     #[arg(long)]
     ea: Option<String>,
-    
+
     /// Startup delay for test launch (default: 10)
     #[arg(long)]
     startup_delay: Option<u64>,
@@ -101,34 +101,34 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
-    
+
     let cli = Cli::parse();
-    
+
     if cli.test_launch {
         run_test_launch(cli.ea, cli.startup_delay).await?;
         return Ok(());
     }
-    
+
     if let Some(port) = cli.port {
         run_tcp_server(port).await?;
     } else {
         run_stdio_server().await?;
     }
-    
+
     Ok(())
 }
 
 async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Result<()> {
     let expert = ea.ok_or_else(|| anyhow::anyhow!("--ea is required for test launch"))?;
     let delay = startup_delay.unwrap_or(10);
-    
+
     println!("Testing MT5 backtest launch optimizations...");
     println!("==============================================");
     println!("EA: {}", expert);
     println!("Startup delay: {}s", delay);
-    
+
     let config = Config::load()?;
-    
+
     let params = BacktestParams {
         expert: expert.clone(),
         symbol: "XAUUSD".to_string(),
@@ -150,9 +150,9 @@ async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Resu
         startup_delay_secs: delay,
         inactivity_kill_secs: None,
     };
-    
+
     let pipeline = BacktestPipeline::new(config);
-    
+
     println!("\nLaunching backtest...");
     let start = Instant::now();
     match pipeline.launch_backtest(params).await {
@@ -168,20 +168,21 @@ async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Resu
             println!("✗ Launch failed after {:.2}s: {}", elapsed.as_secs_f64(), e);
         }
     }
-    
+
     println!("\n==============================================");
     println!("Test complete.");
-    
+
     Ok(())
 }
 
 async fn run_stdio_server() -> Result<()> {
     info!("Starting MT5-Quant MCP server on stdio");
-    
+
     let server = std::sync::Arc::new(mcp_server::McpServer::new());
-    let (notification_tx, mut notification_rx) = tokio::sync::mpsc::unbounded_channel::<mcp_server::Notification>();
+    let (notification_tx, mut notification_rx) =
+        tokio::sync::mpsc::unbounded_channel::<mcp_server::Notification>();
     server.set_notification_sender(notification_tx).await;
-    
+
     // Spawn notification sender task
     tokio::spawn(async move {
         while let Some(notification) = notification_rx.recv().await {
@@ -194,10 +195,10 @@ async fn run_stdio_server() -> Result<()> {
             let _ = stdout().flush();
         }
     });
-    
+
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut line = String::new();
-    
+
     loop {
         line.clear();
         match reader.read_line(&mut line).await {
@@ -207,7 +208,7 @@ async fn run_stdio_server() -> Result<()> {
                 if line.is_empty() {
                     continue;
                 }
-                
+
                 let server_clone = server.clone();
                 match serde_json::from_str::<McpRequest>(line) {
                     Ok(request) => {
@@ -245,20 +246,20 @@ async fn run_stdio_server() -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
 
 async fn run_tcp_server(port: u16) -> Result<()> {
     info!("Starting MT5-Quant MCP server on TCP port {}", port);
-    
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
     info!("Listening on 127.0.0.1:{}", port);
-    
+
     loop {
         let (socket, addr) = listener.accept().await?;
         info!("New connection from {}", addr);
-        
+
         tokio::spawn(async move {
             if let Err(e) = handle_connection(socket).await {
                 error!("Connection error: {}", e);
@@ -272,7 +273,7 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
     let server = mcp_server::McpServer::new();
-    
+
     loop {
         line.clear();
         match reader.read_line(&mut line).await {
@@ -282,7 +283,7 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
                 if line.is_empty() {
                     continue;
                 }
-                
+
                 match serde_json::from_str::<McpRequest>(line) {
                     Ok(request) => {
                         if request.id.is_none() {
@@ -304,6 +305,6 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

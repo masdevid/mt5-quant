@@ -88,7 +88,13 @@ impl DealAnalyzer {
                 } else {
                     0.0
                 };
-                balance_curve.push((deal.time.clone(), balance, dd_pct, deal.profit, deal.comment.clone()));
+                balance_curve.push((
+                    deal.time.clone(),
+                    balance,
+                    dd_pct,
+                    deal.profit,
+                    deal.comment.clone(),
+                ));
             }
         }
 
@@ -142,7 +148,13 @@ impl DealAnalyzer {
         events
     }
 
-    fn build_dd_event(&self, curve: &[(String, f64, f64, f64, String)], start_idx: usize, peak_idx: usize, recovery_idx: Option<usize>) -> DrawdownEvent {
+    fn build_dd_event(
+        &self,
+        curve: &[(String, f64, f64, f64, String)],
+        start_idx: usize,
+        peak_idx: usize,
+        recovery_idx: Option<usize>,
+    ) -> DrawdownEvent {
         let (start_time, _, _, _, _) = &curve[start_idx];
         let (peak_time, _, peak_dd, _, _) = &curve[peak_idx];
 
@@ -159,10 +171,13 @@ impl DealAnalyzer {
         if let Some(rec_idx) = recovery_idx {
             let (rec_time, _, _, _, _) = &curve[rec_idx];
             event.recovery_date = Some(Self::extract_date(rec_time));
-            
+
             if let (Ok(start_dt), Ok(rec_dt)) = (
                 chrono::NaiveDate::parse_from_str(&event.start_date, "%Y-%m-%d"),
-                chrono::NaiveDate::parse_from_str(event.recovery_date.as_ref().unwrap(), "%Y-%m-%d")
+                chrono::NaiveDate::parse_from_str(
+                    event.recovery_date.as_ref().unwrap(),
+                    "%Y-%m-%d",
+                ),
             ) {
                 event.recovery_days = Some((rec_dt - start_dt).num_days() as i32);
             }
@@ -170,7 +185,7 @@ impl DealAnalyzer {
 
         if let (Ok(start_dt), Ok(end_dt)) = (
             chrono::NaiveDate::parse_from_str(&event.start_date, "%Y-%m-%d"),
-            chrono::NaiveDate::parse_from_str(&event.end_date, "%Y-%m-%d")
+            chrono::NaiveDate::parse_from_str(&event.end_date, "%Y-%m-%d"),
         ) {
             event.duration_days = (end_dt - start_dt).num_days() as i32;
         }
@@ -255,7 +270,7 @@ impl DealAnalyzer {
                 if let Some(in_deal) = open_pos.remove(order) {
                     if let (Some(dt_out), Some(dt_in)) = (
                         Self::parse_datetime(&deal.time),
-                        Self::parse_datetime(&in_deal.time)
+                        Self::parse_datetime(&in_deal.time),
                     ) {
                         let hold_minutes = (dt_out - dt_in).num_seconds() as f64 / 60.0;
 
@@ -303,13 +318,20 @@ impl DealAnalyzer {
             .into_iter()
             .filter(|(_, (trades, _, _))| *trades > 0)
             .map(|(d, (trades, wins, total_pnl))| {
-                let avg_pnl = if trades > 0 { total_pnl / trades as f64 } else { 0.0 };
-                (d, DirectionStats {
-                    trades,
-                    win_rate: ((wins as f64 / trades as f64) * 1000.0).round() / 10.0,
-                    total_pnl: (total_pnl * 100.0).round() / 100.0,
-                    avg_pnl: (avg_pnl * 100.0).round() / 100.0,
-                })
+                let avg_pnl = if trades > 0 {
+                    total_pnl / trades as f64
+                } else {
+                    0.0
+                };
+                (
+                    d,
+                    DirectionStats {
+                        trades,
+                        win_rate: ((wins as f64 / trades as f64) * 1000.0).round() / 10.0,
+                        total_pnl: (total_pnl * 100.0).round() / 100.0,
+                        avg_pnl: (avg_pnl * 100.0).round() / 100.0,
+                    },
+                )
             })
             .collect()
     }
@@ -368,7 +390,11 @@ impl DealAnalyzer {
             max_loss_start,
             max_loss_end,
             current_streak: if last.profit > 0.0 { cur_win } else { cur_loss },
-            current_streak_type: if last.profit > 0.0 { "win".to_string() } else { "loss".to_string() },
+            current_streak_type: if last.profit > 0.0 {
+                "win".to_string()
+            } else {
+                "loss".to_string()
+            },
         }
     }
 
@@ -400,12 +426,15 @@ impl DealAnalyzer {
             }
         }
 
-        ConcurrentPeak { peak_open: peak, peak_time }
+        ConcurrentPeak {
+            peak_open: peak,
+            peak_time,
+        }
     }
 
     fn parse_datetime(time_str: &str) -> Option<DateTime<chrono::Utc>> {
         let s = time_str.trim();
-        
+
         let formats = [
             "%Y.%m.%d %H:%M:%S",
             "%Y-%m-%d %H:%M:%S",
@@ -735,7 +764,8 @@ impl DealAnalyzer {
                     chrono::Weekday::Fri => "Fri",
                     chrono::Weekday::Sat => "Sat",
                     chrono::Weekday::Sun => "Sun",
-                }.to_string();
+                }
+                .to_string();
 
                 let entry = hourly.entry(hour).or_insert((0, 0, 0.0));
                 entry.0 += 1;
@@ -744,7 +774,9 @@ impl DealAnalyzer {
                     entry.1 += 1;
                 }
 
-                let day_entry = daily.entry(day_name.clone()).or_insert((0, 0, 0.0, day_num));
+                let day_entry = daily
+                    .entry(day_name.clone())
+                    .or_insert((0, 0, 0.0, day_num));
                 day_entry.0 += 1;
                 day_entry.2 += deal.profit;
                 if deal.profit > 0.0 {
@@ -760,7 +792,11 @@ impl DealAnalyzer {
                 trades,
                 wins,
                 total_pnl: (total_pnl * 100.0).round() / 100.0,
-                win_rate: if trades > 0 { (wins as f64 / trades as f64 * 1000.0).round() / 10.0 } else { 0.0 },
+                win_rate: if trades > 0 {
+                    (wins as f64 / trades as f64 * 1000.0).round() / 10.0
+                } else {
+                    0.0
+                },
             })
             .collect();
         by_hour.sort_by_key(|h| h.hour);
@@ -773,15 +809,35 @@ impl DealAnalyzer {
                 trades,
                 wins,
                 total_pnl: (total_pnl * 100.0).round() / 100.0,
-                win_rate: if trades > 0 { (wins as f64 / trades as f64 * 1000.0).round() / 10.0 } else { 0.0 },
+                win_rate: if trades > 0 {
+                    (wins as f64 / trades as f64 * 1000.0).round() / 10.0
+                } else {
+                    0.0
+                },
             })
             .collect();
         by_day.sort_by_key(|d| d.day_num);
 
-        let best_hour = by_hour.iter().max_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap()).map(|h| h.hour).unwrap_or(-1);
-        let worst_hour = by_hour.iter().min_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap()).map(|h| h.hour).unwrap_or(-1);
-        let best_day = by_day.iter().max_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap()).map(|d| d.day.clone()).unwrap_or_default();
-        let worst_day = by_day.iter().min_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap()).map(|d| d.day.clone()).unwrap_or_default();
+        let best_hour = by_hour
+            .iter()
+            .max_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap())
+            .map(|h| h.hour)
+            .unwrap_or(-1);
+        let worst_hour = by_hour
+            .iter()
+            .min_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap())
+            .map(|h| h.hour)
+            .unwrap_or(-1);
+        let best_day = by_day
+            .iter()
+            .max_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap())
+            .map(|d| d.day.clone())
+            .unwrap_or_default();
+        let worst_day = by_day
+            .iter()
+            .min_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap())
+            .map(|d| d.day.clone())
+            .unwrap_or_default();
 
         TimePerformance {
             by_hour,
@@ -838,7 +894,11 @@ impl DealAnalyzer {
         let correlation = if n > 1.0 {
             let numerator = n * sum_xy - sum_x * sum_y;
             let denominator = ((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y)).sqrt();
-            if denominator > 0.0 { numerator / denominator } else { 0.0 }
+            if denominator > 0.0 {
+                numerator / denominator
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -863,7 +923,11 @@ impl DealAnalyzer {
                     .collect();
                 let count = bucket_deals.len() as i32;
                 let total_pnl: f64 = bucket_deals.iter().map(|(_, p)| *p).sum();
-                let avg_profit = if count > 0 { total_pnl / count as f64 } else { 0.0 };
+                let avg_profit = if count > 0 {
+                    total_pnl / count as f64
+                } else {
+                    0.0
+                };
 
                 HoldTimeBucket {
                     range: range.to_string(),
@@ -903,15 +967,29 @@ impl DealAnalyzer {
 
         let mut result: Vec<LayerPerformance> = layer_stats
             .into_iter()
-            .map(|(layer, (trades, wins, total_pnl, total_volume))| LayerPerformance {
-                layer,
-                trades,
-                wins,
-                total_pnl: (total_pnl * 100.0).round() / 100.0,
-                win_rate: if trades > 0 { (wins as f64 / trades as f64 * 1000.0).round() / 10.0 } else { 0.0 },
-                avg_volume: if trades > 0 { (total_volume / trades as f64 * 10000.0).round() / 10000.0 } else { 0.0 },
-                avg_profit: if trades > 0 { (total_pnl / trades as f64 * 100.0).round() / 100.0 } else { 0.0 },
-            })
+            .map(
+                |(layer, (trades, wins, total_pnl, total_volume))| LayerPerformance {
+                    layer,
+                    trades,
+                    wins,
+                    total_pnl: (total_pnl * 100.0).round() / 100.0,
+                    win_rate: if trades > 0 {
+                        (wins as f64 / trades as f64 * 1000.0).round() / 10.0
+                    } else {
+                        0.0
+                    },
+                    avg_volume: if trades > 0 {
+                        (total_volume / trades as f64 * 10000.0).round() / 10000.0
+                    } else {
+                        0.0
+                    },
+                    avg_profit: if trades > 0 {
+                        (total_pnl / trades as f64 * 100.0).round() / 100.0
+                    } else {
+                        0.0
+                    },
+                },
+            )
             .collect();
 
         result.sort_by_key(|l| l.layer);
@@ -942,7 +1020,11 @@ impl DealAnalyzer {
         let correlation = if n > 1.0 {
             let numerator = n * sum_xy - sum_x * sum_y;
             let denominator = ((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y)).sqrt();
-            if denominator > 0.0 { numerator / denominator } else { 0.0 }
+            if denominator > 0.0 {
+                numerator / denominator
+            } else {
+                0.0
+            }
         } else {
             0.0
         };
@@ -967,7 +1049,11 @@ impl DealAnalyzer {
                     .collect();
                 let trades = bucket_deals.len() as i32;
                 let total_pnl: f64 = bucket_deals.iter().map(|d| d.profit).sum();
-                let avg_profit = if trades > 0 { total_pnl / trades as f64 } else { 0.0 };
+                let avg_profit = if trades > 0 {
+                    total_pnl / trades as f64
+                } else {
+                    0.0
+                };
 
                 VolumeBucket {
                     volume_range: range.to_string(),
@@ -990,10 +1076,21 @@ impl DealAnalyzer {
         let total_commission: f64 = deals.iter().map(|d| d.commission.abs()).sum();
         let total_swap: f64 = deals.iter().map(|d| d.swap.abs()).sum();
         let gross_profit: f64 = deals.iter().map(|d| d.profit).filter(|p| *p > 0.0).sum();
-        let trade_count = deals.iter().filter(|d| d.entry.to_lowercase().contains("out")).count() as f64;
+        let trade_count = deals
+            .iter()
+            .filter(|d| d.entry.to_lowercase().contains("out"))
+            .count() as f64;
 
-        let commission_pct = if gross_profit > 0.0 { (total_commission / gross_profit * 10000.0).round() / 100.0 } else { 0.0 };
-        let swap_pct = if gross_profit > 0.0 { (total_swap / gross_profit * 10000.0).round() / 100.0 } else { 0.0 };
+        let commission_pct = if gross_profit > 0.0 {
+            (total_commission / gross_profit * 10000.0).round() / 100.0
+        } else {
+            0.0
+        };
+        let swap_pct = if gross_profit > 0.0 {
+            (total_swap / gross_profit * 10000.0).round() / 100.0
+        } else {
+            0.0
+        };
 
         // Calculate what win rate would be without costs
         let wins_before_costs = deals
@@ -1003,21 +1100,44 @@ impl DealAnalyzer {
                 d.entry.to_lowercase().contains("out") && profit_before_costs > 0.0
             })
             .count() as f64;
-        let total_closed = deals.iter().filter(|d| d.entry.to_lowercase().contains("out")).count() as f64;
-        let win_rate_before_costs = if total_closed > 0.0 { wins_before_costs / total_closed * 100.0 } else { 0.0 };
+        let total_closed = deals
+            .iter()
+            .filter(|d| d.entry.to_lowercase().contains("out"))
+            .count() as f64;
+        let win_rate_before_costs = if total_closed > 0.0 {
+            wins_before_costs / total_closed * 100.0
+        } else {
+            0.0
+        };
 
-        let current_wins = deals.iter().filter(|d| d.entry.to_lowercase().contains("out") && d.profit > 0.0).count() as f64;
-        let current_win_rate = if total_closed > 0.0 { current_wins / total_closed * 100.0 } else { 0.0 };
+        let current_wins = deals
+            .iter()
+            .filter(|d| d.entry.to_lowercase().contains("out") && d.profit > 0.0)
+            .count() as f64;
+        let current_win_rate = if total_closed > 0.0 {
+            current_wins / total_closed * 100.0
+        } else {
+            0.0
+        };
 
         CostAnalysis {
             total_commission: (total_commission * 100.0).round() / 100.0,
             total_swap: (total_swap * 100.0).round() / 100.0,
             commission_pct_of_profit: commission_pct,
             swap_pct_of_profit: swap_pct,
-            avg_commission_per_trade: if trade_count > 0.0 { (total_commission / trade_count * 100.0).round() / 100.0 } else { 0.0 },
-            avg_swap_per_trade: if trade_count > 0.0 { (total_swap / trade_count * 100.0).round() / 100.0 } else { 0.0 },
+            avg_commission_per_trade: if trade_count > 0.0 {
+                (total_commission / trade_count * 100.0).round() / 100.0
+            } else {
+                0.0
+            },
+            avg_swap_per_trade: if trade_count > 0.0 {
+                (total_swap / trade_count * 100.0).round() / 100.0
+            } else {
+                0.0
+            },
             net_profit_before_costs: (gross_profit * 100.0).round() / 100.0,
-            cost_impact_on_win_rate: (win_rate_before_costs - current_win_rate * 100.0).round() / 100.0,
+            cost_impact_on_win_rate: (win_rate_before_costs - current_win_rate * 100.0).round()
+                / 100.0,
         }
     }
 
@@ -1062,7 +1182,11 @@ impl DealAnalyzer {
         }
 
         let total_hold_hours = total_hold_minutes / 60.0;
-        let avg_trade_duration = if total_trades > 0.0 { total_hold_minutes / total_trades / 60.0 } else { 0.0 };
+        let avg_trade_duration = if total_trades > 0.0 {
+            total_hold_minutes / total_trades / 60.0
+        } else {
+            0.0
+        };
 
         // Get date range
         let dates: Vec<DateTime<chrono::Utc>> = deals
@@ -1089,9 +1213,17 @@ impl DealAnalyzer {
         };
 
         EfficiencyAnalysis {
-            profit_per_hour: if total_hold_hours > 0.0 { (total_profit / total_hold_hours * 100.0).round() / 100.0 } else { 0.0 },
+            profit_per_hour: if total_hold_hours > 0.0 {
+                (total_profit / total_hold_hours * 100.0).round() / 100.0
+            } else {
+                0.0
+            },
             profit_per_day: (total_profit / total_days * 100.0).round() / 100.0,
-            profit_per_trade_hour: if total_hold_hours > 0.0 { (total_profit / total_hold_hours / total_trades * 100.0).round() / 100.0 } else { 0.0 },
+            profit_per_trade_hour: if total_hold_hours > 0.0 {
+                (total_profit / total_hold_hours / total_trades * 100.0).round() / 100.0
+            } else {
+                0.0
+            },
             avg_trade_duration_hours: (avg_trade_duration * 10.0).round() / 10.0,
             annualized_return_pct: (annualized * 10.0).round() / 10.0,
             trades_per_day: (total_trades / total_days * 10.0).round() / 10.0,

@@ -1,7 +1,7 @@
+use crate::models::Config;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::fs;
-use crate::models::Config;
 
 /// Read a file that may be UTF-16LE (with BOM) or UTF-8, returning a UTF-8 String.
 fn read_file_as_utf8(path: &str) -> Result<String> {
@@ -14,13 +14,13 @@ fn read_file_as_utf8(path: &str) -> Result<String> {
         String::from_utf16(&utf16_data)
             .map_err(|e| anyhow::anyhow!("Failed to decode UTF-16LE: {}", e))
     } else {
-        String::from_utf8(bytes)
-            .map_err(|e| anyhow::anyhow!("Failed to decode as UTF-8: {}", e))
+        String::from_utf8(bytes).map_err(|e| anyhow::anyhow!("Failed to decode as UTF-8: {}", e))
     }
 }
 
 pub async fn handle_read_set_file(args: &Value) -> Result<Value> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
@@ -31,20 +31,26 @@ pub async fn handle_read_set_file(args: &Value) -> Result<Value> {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let value = value.trim();
-            
+
             if value.contains("||Y") {
                 let parts: Vec<&str> = value.split("||").collect();
                 if parts.len() >= 5 {
-                    params.insert(key.to_string(), json!({
-                        "value": parts[0],
-                        "from": parts[1],
-                        "step": parts[2],
-                        "to": parts[3],
-                        "optimize": true,
-                    }));
+                    params.insert(
+                        key.to_string(),
+                        json!({
+                            "value": parts[0],
+                            "from": parts[1],
+                            "step": parts[2],
+                            "to": parts[3],
+                            "optimize": true,
+                        }),
+                    );
                 }
             } else {
-                params.insert(key.to_string(), json!({ "value": value, "optimize": false }));
+                params.insert(
+                    key.to_string(),
+                    json!({ "value": value, "optimize": false }),
+                );
             }
         }
     }
@@ -59,29 +65,65 @@ pub async fn handle_read_set_file(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_write_set_file(args: &Value) -> Result<Value> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
-    let params = args.get("parameters")
+    let params = args
+        .get("parameters")
         .and_then(|v| v.as_object())
         .ok_or_else(|| anyhow::anyhow!("parameters object is required"))?;
+
+    /// A scalar JSON value (bool/number/string) rendered as a .set value.
+    fn scalar_to_value(v: &Value) -> String {
+        match v {
+            Value::Bool(b) => b.to_string(),
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }
+    }
 
     let mut lines = Vec::new();
     for (key, value) in params {
         if let Some(obj) = value.as_object() {
-            if obj.get("optimize").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if obj
+                .get("optimize")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 let from_val = obj.get("from").and_then(|v| v.as_str()).unwrap_or("0");
                 let step = obj.get("step").and_then(|v| v.as_str()).unwrap_or("1");
                 let to_val = obj.get("to").and_then(|v| v.as_str()).unwrap_or("0");
-                lines.push(format!("{}={}||{}||{}||{}||Y", key, obj.get("value").and_then(|v| v.as_str()).unwrap_or("0"), from_val, step, to_val));
+                lines.push(format!(
+                    "{}={}||{}||{}||{}||Y",
+                    key,
+                    obj.get("value").and_then(|v| v.as_str()).unwrap_or("0"),
+                    from_val,
+                    step,
+                    to_val
+                ));
             } else {
-                lines.push(format!("{}={}", key, obj.get("value").and_then(|v| v.as_str()).unwrap_or("0")));
+                lines.push(format!(
+                    "{}={}",
+                    key,
+                    obj.get("value").and_then(|v| v.as_str()).unwrap_or("0")
+                ));
             }
+        } else {
+            // Plain scalar (bool/number/string), not the {"value":..,"optimize":..}
+            // form - accept it directly instead of silently dropping the parameter.
+            lines.push(format!("{}={}", key, scalar_to_value(value)));
         }
     }
 
-    fs::write(path, lines.join("\n"))?;
+    let mut utf16_content: Vec<u16> = vec![0xFEFF]; // BOM - matches the format MT5's tester actually writes/expects
+    utf16_content.extend(lines.join("\r\n").encode_utf16());
+    let bytes: Vec<u8> = utf16_content
+        .iter()
+        .flat_map(|&c| [(c & 0xFF) as u8, ((c >> 8) & 0xFF) as u8])
+        .collect();
+    fs::write(path, bytes)?;
 
     Ok(json!({
         "content": [{ "type": "text", "text": json!({
@@ -94,11 +136,13 @@ pub async fn handle_write_set_file(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_patch_set_file(args: &Value) -> Result<Value> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
-    let patches = args.get("patches")
+    let patches = args
+        .get("patches")
         .and_then(|v| v.as_object())
         .ok_or_else(|| anyhow::anyhow!("patches object is required"))?;
 
@@ -112,7 +156,11 @@ pub async fn handle_patch_set_file(args: &Value) -> Result<Value> {
         } else if let Some(n) = value.as_f64() {
             n.to_string()
         } else if let Some(b) = value.as_bool() {
-            if b { "true".to_string() } else { "false".to_string() }
+            if b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
         } else {
             value.to_string()
         };
@@ -151,11 +199,13 @@ pub async fn handle_patch_set_file(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_clone_set_file(args: &Value) -> Result<Value> {
-    let source = args.get("source")
+    let source = args
+        .get("source")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("source is required"))?;
 
-    let destination = args.get("destination")
+    let destination = args
+        .get("destination")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("destination is required"))?;
 
@@ -172,11 +222,13 @@ pub async fn handle_clone_set_file(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_diff_set_files(args: &Value) -> Result<Value> {
-    let file_a = args.get("file_a")
+    let file_a = args
+        .get("file_a")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("file_a is required"))?;
 
-    let file_b = args.get("file_b")
+    let file_b = args
+        .get("file_b")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("file_b is required"))?;
 
@@ -207,11 +259,13 @@ pub async fn handle_diff_set_files(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_set_from_optimization(args: &Value) -> Result<Value> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
-    let params = args.get("params")
+    let params = args
+        .get("params")
         .and_then(|v| v.as_object())
         .ok_or_else(|| anyhow::anyhow!("params is required"))?;
 
@@ -235,7 +289,8 @@ pub async fn handle_set_from_optimization(args: &Value) -> Result<Value> {
 }
 
 pub async fn handle_describe_sweep(args: &Value) -> Result<Value> {
-    let path = args.get("path")
+    let path = args
+        .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("path is required"))?;
 
@@ -246,15 +301,18 @@ pub async fn handle_describe_sweep(args: &Value) -> Result<Value> {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let value = value.trim();
-            
+
             if value.contains("||Y") {
                 let parts: Vec<&str> = value.split("||").collect();
                 if parts.len() >= 5 && parts[4].trim().to_uppercase() == "Y" {
-                    sweep_params.insert(key.to_string(), json!({
-                        "from": parts[1].trim(),
-                        "to": parts[3].trim(),
-                        "step": parts[2].trim(),
-                    }));
+                    sweep_params.insert(
+                        key.to_string(),
+                        json!({
+                            "from": parts[1].trim(),
+                            "to": parts[3].trim(),
+                            "step": parts[2].trim(),
+                        }),
+                    );
                 }
             }
         }
@@ -278,7 +336,8 @@ pub async fn handle_list_set_files(config: &Config) -> Result<Value> {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "set").unwrap_or(false) {
-                    let name = path.file_stem()
+                    let name = path
+                        .file_stem()
                         .and_then(|s| s.to_str())
                         .unwrap_or("unknown")
                         .to_string();

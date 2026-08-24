@@ -38,7 +38,7 @@ impl CurrentAccount {
             String::from_utf16(&u16_slice).ok()?
         } else {
             // Try UTF-8 fallback
-            String::from_utf8(bytes).ok()? 
+            String::from_utf8(bytes).ok()?
         };
 
         let mut login = None;
@@ -46,10 +46,11 @@ impl CurrentAccount {
 
         for line in content.lines() {
             // Remove null bytes and control characters but keep printable ASCII and valid Unicode
-            let cleaned: String = line.chars()
+            let cleaned: String = line
+                .chars()
                 .filter(|c| *c != '\0' && !c.is_control())
                 .collect();
-            
+
             let trimmed = cleaned.trim();
             if trimmed.starts_with("Login=") {
                 let val = trimmed.strip_prefix("Login=").map(|s| s.trim().to_string());
@@ -59,7 +60,9 @@ impl CurrentAccount {
                     }
                 }
             } else if trimmed.starts_with("Server=") {
-                let val = trimmed.strip_prefix("Server=").map(|s| s.trim().to_string());
+                let val = trimmed
+                    .strip_prefix("Server=")
+                    .map(|s| s.trim().to_string());
                 if let Some(v) = val {
                     if !v.is_empty() {
                         server = Some(v);
@@ -69,13 +72,16 @@ impl CurrentAccount {
         }
 
         match (login, server) {
-            (Some(l), Some(s)) => Some(Self { login: l, server: s }),
+            (Some(l), Some(s)) => Some(Self {
+                login: l,
+                server: s,
+            }),
             _ => None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     pub wine_executable: Option<String>,
     pub terminal_dir: Option<String>,
@@ -100,36 +106,6 @@ pub struct Config {
     pub backtest_server: Option<String>,
     pub backtest_password: Option<String>,
     pub project_dir: Option<String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            wine_executable: None,
-            terminal_dir: None,
-            experts_dir: None,
-            indicators_dir: None,
-            scripts_dir: None,
-            tester_profiles_dir: None,
-            tester_cache_dir: None,
-            display_mode: None,
-            backtest_symbol: None,
-            backtest_deposit: None,
-            backtest_currency: None,
-            backtest_leverage: None,
-            backtest_model: None,
-            backtest_timeframe: None,
-            backtest_timeout: None,
-            opt_log_dir: None,
-            opt_min_agents: None,
-            opt_max_agents: None,
-            reports_dir: None,
-            backtest_login: None,
-            backtest_server: None,
-            backtest_password: None,
-            project_dir: None,
-        }
-    }
 }
 
 impl Config {
@@ -177,14 +153,17 @@ impl Config {
         }
 
         // 3. Check standard location
-        let standard_config = Self::standard_config_dir().join("config").join("mt5-quant.yaml");
+        let standard_config = Self::standard_config_dir()
+            .join("config")
+            .join("mt5-quant.yaml");
         if standard_config.exists() {
             return standard_config;
         }
 
         // 4. Development fallback - use project directory
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dev_config = manifest_dir.parent()
+        let dev_config = manifest_dir
+            .parent()
             .unwrap_or(manifest_dir)
             .join("config")
             .join("mt5-quant.yaml");
@@ -193,40 +172,52 @@ impl Config {
         }
 
         // 5. Fall back to standard location (will be created if not exists)
-        Self::standard_config_dir().join("config").join("mt5-quant.yaml")
+        Self::standard_config_dir()
+            .join("config")
+            .join("mt5-quant.yaml")
     }
 
     // ── Auto-discovery ────────────────────────────────────────────────────────
 
     pub fn auto_discover() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let mut cfg = Config::default();
-
-        // 1. Find Wine executable -------------------------------------------
-        cfg.wine_executable = Self::find_wine(&home);
+        let mut cfg = Config {
+            wine_executable: Self::find_wine(&home),
+            ..Default::default()
+        };
 
         // 2. Find MT5 terminal directory ------------------------------------
         if let Some(mt5_dir) = Self::find_mt5_dir(&home) {
             cfg.experts_dir = Some(
-                mt5_dir.join("MQL5").join("Experts")
-                    .to_string_lossy().to_string(),
+                mt5_dir
+                    .join("MQL5")
+                    .join("Experts")
+                    .to_string_lossy()
+                    .to_string(),
             );
             cfg.indicators_dir = Some(
-                mt5_dir.join("MQL5").join("Indicators")
-                    .to_string_lossy().to_string(),
+                mt5_dir
+                    .join("MQL5")
+                    .join("Indicators")
+                    .to_string_lossy()
+                    .to_string(),
             );
             cfg.scripts_dir = Some(
-                mt5_dir.join("MQL5").join("Scripts")
-                    .to_string_lossy().to_string(),
+                mt5_dir
+                    .join("MQL5")
+                    .join("Scripts")
+                    .to_string_lossy()
+                    .to_string(),
             );
             cfg.tester_profiles_dir = Some(
-                mt5_dir.join("MQL5").join("Profiles").join("Tester")
-                    .to_string_lossy().to_string(),
+                mt5_dir
+                    .join("MQL5")
+                    .join("Profiles")
+                    .join("Tester")
+                    .to_string_lossy()
+                    .to_string(),
             );
-            cfg.tester_cache_dir = Some(
-                mt5_dir.join("Tester")
-                    .to_string_lossy().to_string(),
-            );
+            cfg.tester_cache_dir = Some(mt5_dir.join("Tester").to_string_lossy().to_string());
             cfg.terminal_dir = Some(mt5_dir.to_string_lossy().to_string());
         }
 
@@ -234,16 +225,16 @@ impl Config {
         cfg.display_mode = Some(Self::detect_display_mode());
 
         // 4. Sensible backtest defaults ------------------------------------
-        cfg.backtest_symbol   = Some("XAUUSD".into());
-        cfg.backtest_deposit  = Some(10000);
+        cfg.backtest_symbol = Some("XAUUSD".into());
+        cfg.backtest_deposit = Some(10000);
         cfg.backtest_currency = Some("USD".into());
         cfg.backtest_leverage = Some(500);
-        cfg.backtest_model    = Some(0);
+        cfg.backtest_model = Some(0);
         cfg.backtest_timeframe = Some("M5".into());
-        cfg.backtest_timeout  = Some(900);
-        cfg.opt_log_dir       = Some("/tmp".into());
-        cfg.opt_min_agents    = Some(1);
-        cfg.opt_max_agents    = Some(20);
+        cfg.backtest_timeout = Some(900);
+        cfg.opt_log_dir = Some("/tmp".into());
+        cfg.opt_min_agents = Some(1);
+        cfg.opt_max_agents = Some(20);
 
         cfg
     }
@@ -255,7 +246,9 @@ impl Config {
             PathBuf::from("/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine64"),
             // macOS: CrossOver (new versions may use 'wine', older ones 'wine64')
             home.join("Applications/CrossOver.app/Contents/SharedSupport/CrossOver/wine/bin/wine"),
-            home.join("Applications/CrossOver.app/Contents/SharedSupport/CrossOver/wine/bin/wine64"),
+            home.join(
+                "Applications/CrossOver.app/Contents/SharedSupport/CrossOver/wine/bin/wine64",
+            ),
             // macOS: Homebrew Apple Silicon (prefer 'wine', fall back to 'wine64')
             PathBuf::from("/opt/homebrew/bin/wine"),
             PathBuf::from("/opt/homebrew/bin/wine64"),
@@ -266,7 +259,8 @@ impl Config {
             PathBuf::from("/usr/bin/wine"),
             PathBuf::from("/usr/bin/wine64"),
         ];
-        candidates.iter()
+        candidates
+            .iter()
             .find(|p| p.exists())
             .map(|p| p.to_string_lossy().to_string())
     }
@@ -284,8 +278,7 @@ impl Config {
         if bottles_root.is_dir() {
             if let Ok(bottles) = fs::read_dir(&bottles_root) {
                 for bottle in bottles.filter_map(|e| e.ok()) {
-                    let mt5 = bottle.path()
-                        .join("drive_c/Program Files/MetaTrader 5");
+                    let mt5 = bottle.path().join("drive_c/Program Files/MetaTrader 5");
                     candidates.push(mt5);
                 }
             }
@@ -344,22 +337,22 @@ impl Config {
              opt_log_dir: {opt_log}\n\
              opt_min_agents: {opt_agents}\n\
              opt_max_agents: {max_agents}\n",
-            wine      = s(&self.wine_executable),
-            term      = s(&self.terminal_dir),
-            exp       = s(&self.experts_dir),
-            ind       = s(&self.indicators_dir),
-            scr       = s(&self.scripts_dir),
-            prof      = s(&self.tester_profiles_dir),
-            cache     = s(&self.tester_cache_dir),
-            disp      = s(&self.display_mode),
-            sym       = s(&self.backtest_symbol),
-            dep       = u(self.backtest_deposit),
-            cur       = s(&self.backtest_currency),
-            lev       = u(self.backtest_leverage),
-            mdl       = u(self.backtest_model),
-            tf        = s(&self.backtest_timeframe),
-            to        = u(self.backtest_timeout),
-            opt_log   = s(&self.opt_log_dir),
+            wine = s(&self.wine_executable),
+            term = s(&self.terminal_dir),
+            exp = s(&self.experts_dir),
+            ind = s(&self.indicators_dir),
+            scr = s(&self.scripts_dir),
+            prof = s(&self.tester_profiles_dir),
+            cache = s(&self.tester_cache_dir),
+            disp = s(&self.display_mode),
+            sym = s(&self.backtest_symbol),
+            dep = u(self.backtest_deposit),
+            cur = s(&self.backtest_currency),
+            lev = u(self.backtest_leverage),
+            mdl = u(self.backtest_model),
+            tf = s(&self.backtest_timeframe),
+            to = u(self.backtest_timeout),
+            opt_log = s(&self.opt_log_dir),
             opt_agents = u(self.opt_min_agents),
             max_agents = u(self.opt_max_agents),
         );
@@ -382,7 +375,8 @@ impl Config {
             }
             if let Some((key, value)) = line.split_once(':') {
                 let key = key.trim().to_string();
-                let value = value.trim()
+                let value = value
+                    .trim()
                     .trim_matches('"')
                     .trim_matches('\'')
                     .to_string();
@@ -393,29 +387,29 @@ impl Config {
         }
 
         Ok(Config {
-            wine_executable:      map.get("wine_executable").cloned(),
-            terminal_dir:         map.get("terminal_dir").cloned(),
-            experts_dir:          map.get("experts_dir").cloned(),
-            indicators_dir:       map.get("indicators_dir").cloned(),
-            scripts_dir:          map.get("scripts_dir").cloned(),
-            tester_profiles_dir:  map.get("tester_profiles_dir").cloned(),
-            tester_cache_dir:     map.get("tester_cache_dir").cloned(),
-            display_mode:         map.get("display_mode").cloned(),
-            backtest_symbol:      map.get("backtest_symbol").cloned(),
-            backtest_deposit:     map.get("backtest_deposit").and_then(|s| s.parse().ok()),
-            backtest_currency:    map.get("backtest_currency").cloned(),
-            backtest_leverage:    map.get("backtest_leverage").and_then(|s| s.parse().ok()),
-            backtest_model:       map.get("backtest_model").and_then(|s| s.parse().ok()),
-            backtest_timeframe:   map.get("backtest_timeframe").cloned(),
-            backtest_timeout:     map.get("backtest_timeout").and_then(|s| s.parse().ok()),
-            opt_log_dir:          map.get("opt_log_dir").cloned(),
-            opt_min_agents:       map.get("opt_min_agents").and_then(|s| s.parse().ok()),
-            opt_max_agents:       map.get("opt_max_agents").and_then(|s| s.parse().ok()),
-            reports_dir:          map.get("reports_dir").cloned(),
-            backtest_login:       map.get("backtest_login").cloned(),
-            backtest_server:      map.get("backtest_server").cloned(),
-            backtest_password:   map.get("backtest_password").cloned(),
-            project_dir:          map.get("project_dir").cloned(),
+            wine_executable: map.get("wine_executable").cloned(),
+            terminal_dir: map.get("terminal_dir").cloned(),
+            experts_dir: map.get("experts_dir").cloned(),
+            indicators_dir: map.get("indicators_dir").cloned(),
+            scripts_dir: map.get("scripts_dir").cloned(),
+            tester_profiles_dir: map.get("tester_profiles_dir").cloned(),
+            tester_cache_dir: map.get("tester_cache_dir").cloned(),
+            display_mode: map.get("display_mode").cloned(),
+            backtest_symbol: map.get("backtest_symbol").cloned(),
+            backtest_deposit: map.get("backtest_deposit").and_then(|s| s.parse().ok()),
+            backtest_currency: map.get("backtest_currency").cloned(),
+            backtest_leverage: map.get("backtest_leverage").and_then(|s| s.parse().ok()),
+            backtest_model: map.get("backtest_model").and_then(|s| s.parse().ok()),
+            backtest_timeframe: map.get("backtest_timeframe").cloned(),
+            backtest_timeout: map.get("backtest_timeout").and_then(|s| s.parse().ok()),
+            opt_log_dir: map.get("opt_log_dir").cloned(),
+            opt_min_agents: map.get("opt_min_agents").and_then(|s| s.parse().ok()),
+            opt_max_agents: map.get("opt_max_agents").and_then(|s| s.parse().ok()),
+            reports_dir: map.get("reports_dir").cloned(),
+            backtest_login: map.get("backtest_login").cloned(),
+            backtest_server: map.get("backtest_server").cloned(),
+            backtest_password: map.get("backtest_password").cloned(),
+            project_dir: map.get("project_dir").cloned(),
         })
     }
 
@@ -423,28 +417,43 @@ impl Config {
 
     pub fn get(&self, key: &str) -> String {
         match key {
-            "wine_executable"    => self.wine_executable.clone().unwrap_or_default(),
-            "terminal_dir"       => self.terminal_dir.clone().unwrap_or_default(),
-            "experts_dir"        => self.experts_dir.clone().unwrap_or_default(),
-            "tester_profiles_dir"=> self.tester_profiles_dir.clone().unwrap_or_default(),
-            "tester_cache_dir"   => self.tester_cache_dir.clone().unwrap_or_default(),
-            "display_mode"       => self.display_mode.clone().unwrap_or_else(|| "auto".to_string()),
-            "backtest_symbol"    => self.backtest_symbol.clone().unwrap_or_default(),
-            "backtest_deposit"   => self.backtest_deposit.unwrap_or(10000).to_string(),
-            "backtest_currency"  => self.backtest_currency.clone().unwrap_or_else(|| "USD".to_string()),
-            "backtest_leverage"  => self.backtest_leverage.unwrap_or(500).to_string(),
-            "backtest_model"     => self.backtest_model.unwrap_or(0).to_string(),
-            "backtest_timeframe" => self.backtest_timeframe.clone().unwrap_or_else(|| "M5".to_string()),
-            "backtest_timeout"   => self.backtest_timeout.unwrap_or(900).to_string(),
-            "opt_log_dir"        => self.opt_log_dir.clone().unwrap_or_else(|| "/tmp".to_string()),
-            "opt_min_agents"     => self.opt_min_agents.unwrap_or(1).to_string(),
-            "opt_max_agents"     => self.opt_max_agents.unwrap_or(0).to_string(),
-            "reports_dir"        => self.reports_dir.clone().unwrap_or_else(|| "reports".to_string()),
-            "backtest_login"     => self.backtest_login.clone().unwrap_or_default(),
-            "backtest_server"    => self.backtest_server.clone().unwrap_or_default(),
-            "backtest_password"  => self.backtest_password.clone().unwrap_or_default(),
-            "project_dir"        => self.project_dir.clone().unwrap_or_default(),
-            _                    => String::new(),
+            "wine_executable" => self.wine_executable.clone().unwrap_or_default(),
+            "terminal_dir" => self.terminal_dir.clone().unwrap_or_default(),
+            "experts_dir" => self.experts_dir.clone().unwrap_or_default(),
+            "tester_profiles_dir" => self.tester_profiles_dir.clone().unwrap_or_default(),
+            "tester_cache_dir" => self.tester_cache_dir.clone().unwrap_or_default(),
+            "display_mode" => self
+                .display_mode
+                .clone()
+                .unwrap_or_else(|| "auto".to_string()),
+            "backtest_symbol" => self.backtest_symbol.clone().unwrap_or_default(),
+            "backtest_deposit" => self.backtest_deposit.unwrap_or(10000).to_string(),
+            "backtest_currency" => self
+                .backtest_currency
+                .clone()
+                .unwrap_or_else(|| "USD".to_string()),
+            "backtest_leverage" => self.backtest_leverage.unwrap_or(500).to_string(),
+            "backtest_model" => self.backtest_model.unwrap_or(0).to_string(),
+            "backtest_timeframe" => self
+                .backtest_timeframe
+                .clone()
+                .unwrap_or_else(|| "M5".to_string()),
+            "backtest_timeout" => self.backtest_timeout.unwrap_or(900).to_string(),
+            "opt_log_dir" => self
+                .opt_log_dir
+                .clone()
+                .unwrap_or_else(|| "/tmp".to_string()),
+            "opt_min_agents" => self.opt_min_agents.unwrap_or(1).to_string(),
+            "opt_max_agents" => self.opt_max_agents.unwrap_or(0).to_string(),
+            "reports_dir" => self
+                .reports_dir
+                .clone()
+                .unwrap_or_else(|| "reports".to_string()),
+            "backtest_login" => self.backtest_login.clone().unwrap_or_default(),
+            "backtest_server" => self.backtest_server.clone().unwrap_or_default(),
+            "backtest_password" => self.backtest_password.clone().unwrap_or_default(),
+            "project_dir" => self.project_dir.clone().unwrap_or_default(),
+            _ => String::new(),
         }
     }
 
@@ -514,7 +523,9 @@ impl Config {
     }
 
     pub fn mt5_dir(&self) -> Option<PathBuf> {
-        self.terminal_dir.as_ref().map(|d| Path::new(d).to_path_buf())
+        self.terminal_dir
+            .as_ref()
+            .map(|d| Path::new(d).to_path_buf())
     }
 
     /// Scan the tester's own history store for symbols with downloaded data.
@@ -619,19 +630,25 @@ impl Config {
         // 3. Cent-suffix normalisation: build a normalised "base" for both sides
         //    Strip known cent suffixes: `.cent`, `c` (trailing, uppercase only), `.c`
         fn base_ticker(sym: &str) -> &str {
-            let s = sym.trim_end_matches(".cent")
-                       .trim_end_matches(".c");
+            let s = sym.trim_end_matches(".cent").trim_end_matches(".c");
             // Strip trailing lowercase 'c' only when the rest is all-uppercase
             // (so "XAUUSDc" → "XAUUSD", but "Misc" stays "Misc")
-            if s.ends_with('c') && s[..s.len()-1].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
-                &s[..s.len()-1]
+            if s.ends_with('c')
+                && s[..s.len() - 1]
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            {
+                &s[..s.len() - 1]
             } else {
                 s
             }
         }
 
         let req_base = base_ticker(requested).to_lowercase();
-        if let Some(s) = available.iter().find(|s| base_ticker(s).to_lowercase() == req_base) {
+        if let Some(s) = available
+            .iter()
+            .find(|s| base_ticker(s).to_lowercase() == req_base)
+        {
             return Some(s.as_str());
         }
 
@@ -648,7 +665,8 @@ impl Config {
 
     /// Get the currently active MT5 account from common.ini
     pub fn current_account(&self) -> Option<CurrentAccount> {
-        self.mt5_dir().and_then(|d| CurrentAccount::from_common_ini(&d))
+        self.mt5_dir()
+            .and_then(|d| CurrentAccount::from_common_ini(&d))
     }
 
     /// Discover symbols for the currently active account/server only
