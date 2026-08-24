@@ -334,7 +334,9 @@ impl ReportExtractor {
         if raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) {
             // UTF-16 BOM
             let text = String::from_utf16_lossy(
-                raw.chunks_exact(2)
+                raw.as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect::<Vec<_>>()
                     .as_slice(),

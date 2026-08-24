@@ -1207,7 +1207,7 @@ pub async fn handle_get_mt5_logs(config: &Config, args: &Value) -> Result<Value>
     }
 
     // Sort by modification time (newest first)
-    log_files.sort_by(|a, b| b.1.cmp(&a.1));
+    log_files.sort_by_key(|file| std::cmp::Reverse(file.1));
 
     if let Some((latest_log, _)) = log_files.first() {
         result["found"] = json!(true);

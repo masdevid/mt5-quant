@@ -359,7 +359,9 @@ impl MqlCompiler {
         };
         if raw.starts_with(&[0xFF, 0xFE]) {
             raw[2..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .filter_map(|c| char::from_u32(c as u32))
                 .collect()

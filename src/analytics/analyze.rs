@@ -412,7 +412,7 @@ impl DealAnalyzer {
             }
         }
 
-        events.sort_by(|a, b| a.0.cmp(&b.0));
+        events.sort_by_key(|event| event.0);
 
         let mut count = 0;
         let mut peak = 0;

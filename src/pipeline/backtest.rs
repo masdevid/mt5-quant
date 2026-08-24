@@ -22,7 +22,9 @@ fn read_set_file_as_utf8(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let utf16_data: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16(&utf16_data).map_err(|e| anyhow!("Failed to decode UTF-16LE: {}", e))
@@ -870,7 +872,9 @@ impl BacktestPipeline {
         let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
             // UTF-16 LE with BOM
             let words: Vec<u16> = bytes[2..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             String::from_utf16_lossy(&words).to_string()
@@ -1288,7 +1292,9 @@ impl BacktestPipeline {
             if content.starts_with(&[0xFF, 0xFE]) || content.starts_with(&[0xFE, 0xFF]) {
                 let text = String::from_utf16_lossy(
                     content
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|c| u16::from_le_bytes([c[0], c[1]]))
                         .collect::<Vec<_>>()
                         .as_slice(),
@@ -1450,7 +1456,9 @@ impl BacktestPipeline {
         let raw = fs::read(&terminal_ini).unwrap_or_default();
         let text = if raw.starts_with(&[0xFF, 0xFE]) {
             raw[2..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect::<Vec<_>>()
                 .iter()

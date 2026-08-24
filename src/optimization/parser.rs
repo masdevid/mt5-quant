@@ -106,14 +106,18 @@ impl OptimizationParser {
             if raw[0] == 0xFF && raw[1] == 0xFE {
                 // UTF-16 LE with BOM
                 let u16_vec: Vec<u16> = raw[2..]
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect();
                 return Ok(String::from_utf16_lossy(&u16_vec));
             } else if raw[0] == 0xFE && raw[1] == 0xFF {
                 // UTF-16 BE with BOM
                 let u16_vec: Vec<u16> = raw[2..]
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| u16::from_be_bytes([c[0], c[1]]))
                     .collect();
                 return Ok(String::from_utf16_lossy(&u16_vec));
@@ -128,7 +132,9 @@ impl OptimizationParser {
         // Try UTF-16 without BOM
         if raw.len() % 2 == 0 {
             let u16_vec: Vec<u16> = raw
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             let text = String::from_utf16_lossy(&u16_vec);
