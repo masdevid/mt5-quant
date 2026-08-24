@@ -1,1 +1,6 @@
 blank_issues_enabled: false
+
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/masdevid/mt5-quant/discussions
+    about: Ask questions and discuss ideas here instead of opening an issue
