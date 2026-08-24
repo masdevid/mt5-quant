@@ -220,14 +220,18 @@ jobs:
           path: mcp-mt5-quant-macos-arm64.tar.gz
 
   # ── Update server.json SHA256 ────────────────────────────────────────────────
-  # Commits the computed SHA256 back to master so server.json always
-  # reflects the latest published package hash.
+  # Updates server.json on master via an auto-merged PR instead of a direct
+  # push: the protect-master ruleset requires build/lint/cargo-deny status
+  # checks, which github-actions[bot] cannot bypass on a direct push. The PR
+  # runs those checks legitimately, then auto-merges once green. This job
+  # blocks until the merge lands so mcp-publish reads the patched server.json.
 
   update-server-json:
     needs: build-mcp-package
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write        # push the ci/* release branch
+      pull-requests: write   # create the PR and enable auto-merge
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,18 +273,60 @@ jobs:
           print(f"Patched: version={version}, sha256={sha256[:16]}...")
           PYEOF
 
-      - name: Commit server.json
+      - name: Commit server.json to release branch
+        id: commit
         run: |
+          BRANCH="ci/server-json-sha-${VERSION}"
+          # Drop any stale branch/PR left over from a previous attempt at
+          # this release so every run starts from a clean slate
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add server.json
           if git diff --cached --quiet; then
             echo "server.json unchanged — no commit needed"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "ci: update server.json SHA256 for v${VERSION} [skip ci]"
-            git push origin master
-            echo "Committed server.json update"
+            git push origin "$BRANCH"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Committed server.json update to ${BRANCH}"
           fi
+
+      - name: Create PR and enable auto-merge
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          BRANCH="ci/server-json-sha-${VERSION}"
+          GH_TOKEN="${{ github.token }}" gh pr create \
+            --title "ci: update server.json SHA256 for v${VERSION} [skip ci]" \
+            --body "Automated MCP package hash update." \
+            --base master \
+            --head "$BRANCH"
+
+          GH_TOKEN="${{ github.token }}" gh pr merge "$BRANCH" --auto --squash
+
+          # Block until required checks (build, lint, cargo-deny x4) finish
+          # and auto-merge completes — mcp-publish depends on this job and
+          # checks out master expecting the patched server.json
+          DEADLINE=$((SECONDS + 1800))
+          while (( SECONDS < DEADLINE )); do
+            STATE=$(GH_TOKEN="${{ github.token }}" gh pr view "$BRANCH" --json state --jq .state)
+            case "$STATE" in
+              MERGED)
+                echo "server.json PR merged to master"
+                exit 0
+                ;;
+              CLOSED)
+                echo "::error::server.json PR was closed without merging" >&2
+                exit 1
+                ;;
+            esac
+            sleep 20
+          done
+          echo "::error::Timed out after 30m waiting for server.json PR auto-merge (required checks: build, lint, cargo-deny x4)" >&2
+          exit 1
 
   # ── MCP Registry Publish ─────────────────────────────────────────────────────
 
