@@ -1,5 +1,7 @@
 # MT5-Quant
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/masdevid/mt5-quant/badge)](https://scorecard.dev/viewer/?uri=github.com/masdevid/mt5-quant)
+
 **MCP server for MT5 strategy development on macOS/Linux.** 89 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
 
 ```
