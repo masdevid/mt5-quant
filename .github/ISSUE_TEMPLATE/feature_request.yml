@@ -1,0 +1,30 @@
+name: Feature Request
+description: Suggest an idea or improvement for mt5-quant
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature. Start with the problem — the solution can be discussed from there.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What are you trying to do, and what is missing or painful today? Name the MCP tool(s) involved, if any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: What would you like to happen? Include rough tool names/arguments if it affects the MCP surface.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Other approaches, workarounds you've tried, or existing tools that almost fit.

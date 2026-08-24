@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report a problem with mt5-quant (backtest, compile, analytics, MCP tools)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please keep answers concise — link gists for very long logs.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear, one-paragraph summary of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Include the MT5 command or MCP tool called, with its arguments (and EA/.set inputs if relevant).
+      placeholder: |
+        1. Call tool `run_backtest` with expert=..., symbol=XAUUSDc, from_date=...
+        2. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_vs_actual
+    attributes:
+      label: Expected vs Actual
+      description: What did you expect to happen, and what actually happened?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+
+  - type: dropdown
+    id: wine_setup
+    attributes:
+      label: Wine / CrossOver setup
+      options:
+        - CrossOver (macOS)
+        - MetaTrader 5.app bundled Wine (macOS)
+        - System Wine on Linux (Xvfb headless)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: mt5_build
+    attributes:
+      label: MT5 terminal build
+      description: e.g. 4885 (Help → About in MetaTrader 5)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Tester journal, MT5 logs, or MCP server output (wrap in code fences).
+      render: text
