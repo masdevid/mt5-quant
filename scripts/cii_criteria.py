@@ -8,15 +8,21 @@ Usage:
             (default: passing)
    --exclude: comma-separated criterion names to SKIP from the pre-filled URL
               (they stay at their current Unmet/?/N/A in the form).
-   --na: comma-separated criterion names to mark as N/A in the pre-filled URL
-         (emits <name>_status=N/A with the justification from the JSON).
+    --na: comma-separated criterion names to mark as N/A in the pre-filled URL
+          (emits <name>_status=N/A with the justification from the JSON).
+    --no-open: never open the generated URL in a browser (useful for CI/piping).
+    --open: force-open the URL even when stdout is not a TTY (e.g. when piped).
 
+When run interactively (stdout is a TTY) the script auto-opens the generated
+edit URL in the default browser. Piping to a file or another command prints the
+URL only (no browser spawn). Use --no-open to suppress auto-open, --open to
+force it regardless of TTY.
 
 The script fetches the upstream criteria.yml to learn which criteria belong to
 which tier/section, then restricts BOTH the printed incomplete list AND the
 generated edit-URL parameters to only that section's criteria.
 """
-import sys, os, json, urllib.request, urllib.parse, argparse
+import sys, os, json, subprocess, urllib.request, urllib.parse, argparse
 import ssl
 
 try:
@@ -62,6 +68,27 @@ def fetch(url):
     req = urllib.request.Request(url, headers={"User-Agent": "cii-skill"})
     with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         return r.read().decode()
+
+
+def open_url(url):
+    """Open `url` in the default browser for the current platform.
+
+    Fails silently with a clear fallback message if the opener is unavailable
+    or errors — never raises, so the script always exits cleanly.
+    """
+    if sys.platform == "darwin":
+        cmd = ["open", url]
+    elif sys.platform.startswith("win"):
+        # Windows: `start` needs a dummy title before the URL argument.
+        cmd = ["cmd", "/c", "start", "", url]
+    else:
+        cmd = ["xdg-open", url]
+
+    try:
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        print(f"\nCould not auto-open the browser ({e}).\n"
+              f"Open this URL manually:\n{url}", file=sys.stderr)
 
 
 def _collect_names(node, out):
@@ -127,6 +154,11 @@ def main():
     parser.add_argument("--na", default="",
                         help="Comma-separated criterion names to mark as N/A "
                              "with the justification from cii_justifications.json.")
+    parser.add_argument("--no-open", action="store_true",
+                        help="Never open the generated URL in a browser "
+                             "(useful for CI/piping).")
+    parser.add_argument("--open", action="store_true",
+                        help="Force-open the URL even when stdout is not a TTY.")
     args = parser.parse_args()
 
     project_id = args.project_id
@@ -214,6 +246,12 @@ def main():
     print("WARNING: pre-fills Unmet/? criteria as 'Met' (and --na as 'N/A') using "
           "justifications from cii_justifications.json.")
     print("Review EVERY field before Save; only mark Met what you genuinely satisfy.")
+
+    # Auto-open the URL in a browser. Default: only when run interactively
+    # (stdout is a TTY) and --no-open was not given. --open forces it even when
+    # piped; --no-open always disables it.
+    if args.open or (sys.stdout.isatty() and not args.no_open):
+        open_url(edit_url)
 
 
 if __name__ == "__main__":
