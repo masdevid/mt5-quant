@@ -15,7 +15,7 @@ jobs:
     permissions:
       security-events: write
       id-token: write
-      contents: read
+      contents: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,3 +36,44 @@ jobs:
       - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           sarif_file: results.sarif
+
+      - name: Update badge JSON
+        if: github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import urllib.request
+
+          url = "https://api.scorecard.dev/projects/github.com/masdevid/mt5-quant"
+          with urllib.request.urlopen(url) as resp:
+              data = json.load(resp)
+
+          score = float(data["score"])
+          if score >= 9:
+              color = "brightgreen"
+          elif score >= 7:
+              color = "yellowgreen"
+          elif score >= 5:
+              color = "yellow"
+          else:
+              color = "red"
+
+          badge = {
+              "schemaVersion": 1,
+              "label": "OpenSSF Scorecard",
+              "message": f"{score:g}",
+              "color": color,
+          }
+          with open("badge.json", "w") as f:
+              json.dump(badge, f)
+          print("Wrote badge.json:", badge)
+          PY
+
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git checkout -B badges
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f badge.json
+          git commit -m "chore: update OpenSSF Scorecard badge" || echo "no changes to commit"
+          git push -f origin badges
