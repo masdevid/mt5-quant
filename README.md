@@ -282,6 +282,19 @@ For crashes or unexplained failures during backtest/compile/optimization:
 
 **[Full Troubleshooting Guide →](docs/TROUBLESHOOTING.md)**
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [QUICKSTART](docs/QUICKSTART.md) | Step-by-step install, setup, and first backtest |
+| [MCP_TOOLS](docs/MCP_TOOLS.md) | Full input/output schemas for all 90 tools |
+| [CONFIG](docs/CONFIG.md) | Configuration reference (`config/mt5-quant.yaml`) |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | Design principles and internal module layout |
+| [REMOTE_AGENTS](docs/REMOTE_AGENTS.md) | Distribute optimization across Linux agents via Wine |
+| [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) | Platform-specific fixes for Wine, MT5, and backtests |
+
+Full index with reading order: [docs/INDEX.md](docs/INDEX.md)
+
 ---
 
 ## Acknowledgements
