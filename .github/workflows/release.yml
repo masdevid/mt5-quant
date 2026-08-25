@@ -23,10 +23,6 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
-    permissions:
-      contents: read
-      id-token: write      # Required for build provenance attestation (OIDC)
-      attestations: write  # Required to publish the attestation
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -64,17 +60,8 @@ jobs:
           name: macos-binary
           path: dist/mcp-mt5-quant-macos-arm64.tar.gz
 
-      - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/mcp-mt5-quant-macos-arm64.tar.gz
-
   build-linux:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write      # Required for build provenance attestation (OIDC)
-      attestations: write  # Required to publish the attestation
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -111,11 +98,6 @@ jobs:
         with:
           name: linux-binary
           path: dist/mcp-mt5-quant-linux-x64.tar.gz
-
-      - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/mcp-mt5-quant-linux-x64.tar.gz
 
   # ── Cargo Publish ────────────────────────────────────────────────────────────
 
@@ -192,13 +174,17 @@ jobs:
 
   # ── MCP Package ──────────────────────────────────────────────────────────────
   # Builds the installable MCP package (binary + config + docs),
-  # computes its SHA256, and uploads to the release.
+  # computes its SHA256, and uploads to the release. Also attests the FINAL
+  # release bytes — the macOS tarball is re-packaged here (server.json added),
+  # so attesting in the build jobs would cover digests that never ship.
 
   build-mcp-package:
     needs: release
     runs-on: macos-latest
     permissions:
-      contents: write
+      contents: write       # Attach the package to the GitHub Release
+      id-token: write       # Required for build provenance attestation (OIDC)
+      attestations: write   # Required to publish the attestation
     outputs:
       sha256: ${{ steps.compute-sha256.outputs.sha256 }}
     env:
@@ -212,6 +198,12 @@ jobs:
           name: macos-binary
           path: dist
 
+      - name: Download Linux binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-binary
+          path: dist
+
       - name: Build MCP package
         run: |
           mkdir -p mcp-package/mcp-server/bin
@@ -222,6 +214,19 @@ jobs:
           cp README.md mcp-package/
           cp server.json mcp-package/
           cd mcp-package && tar -czf ../mcp-mt5-quant-macos-arm64.tar.gz . && cd ..
+
+      # Attest the exact bytes attached to the Release: the re-packaged macOS
+      # tarball at the repo root and the pass-through Linux tarball from the
+      # artifact — so attested digests match the published assets.
+      - name: Generate build provenance attestation (macOS)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: mcp-mt5-quant-macos-arm64.tar.gz
+
+      - name: Generate build provenance attestation (Linux)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/mcp-mt5-quant-linux-x64.tar.gz
 
       - name: Compute SHA256
         id: compute-sha256
