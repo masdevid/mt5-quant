@@ -7,6 +7,12 @@ use crate::models::metrics::Metrics;
 
 pub struct DealAnalyzer;
 
+impl Default for DealAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DealAnalyzer {
     pub fn new() -> Self {
         Self

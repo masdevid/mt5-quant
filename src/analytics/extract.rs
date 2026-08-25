@@ -8,6 +8,12 @@ use crate::models::{Deal, Metrics};
 
 pub struct ReportExtractor;
 
+impl Default for ReportExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportExtractor {
     pub fn new() -> Self {
         Self

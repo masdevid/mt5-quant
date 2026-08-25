@@ -7,10 +7,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
+use mt5_quant::mcp_server::{McpServer, Notification};
 use mt5_quant::models::Config;
 use mt5_quant::pipeline::backtest::{BacktestParams, BacktestPipeline};
-use mt5_quant::mcp_server::{McpServer, Notification};
-use mt5_quant::{McpRequest, McpResponse, McpError};
+use mt5_quant::{McpError, McpRequest, McpResponse};
 
 #[derive(Parser)]
 #[command(name = "mt5-quant")]

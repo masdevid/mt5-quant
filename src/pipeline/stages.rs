@@ -41,6 +41,13 @@ impl Stage {
 pub struct StageExecutor;
 
 #[allow(dead_code)]
+impl Default for StageExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(dead_code)]
 impl StageExecutor {
     pub fn new() -> Self {
         Self

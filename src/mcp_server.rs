@@ -31,6 +31,12 @@ pub struct McpServer {
     notification_tx: Arc<Mutex<Option<mpsc::UnboundedSender<Notification>>>>,
 }
 
+impl Default for McpServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpServer {
     pub fn new() -> Self {
         let config = ModelsConfig::load().unwrap_or_default();

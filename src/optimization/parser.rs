@@ -17,6 +17,12 @@ pub struct OptimizationPass {
 
 pub struct OptimizationParser;
 
+impl Default for OptimizationParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OptimizationParser {
     pub fn new() -> Self {
         Self
