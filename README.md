@@ -33,14 +33,68 @@ Claude: [compile → clean → backtest → analyze 1,847 deals]
 
 ### Install MT5-Quant
 
-Ask your LLM coding platform to install and configure MT5-Quant:
+#### Option A — Cargo (recommended, needs Rust toolchain)
 
-> "Please install mt5-quant. It's a Rust-based MCP server for MT5 backtesting at https://github.com/masdevid/mt5-quant. Run its `scripts/setup.sh` to auto-detect Wine and MT5 paths, register the MCP server, and configure everything."
+```bash
+cargo install mt5-quant --locked
+```
 
-The LLM will:
-1. Download the pre-built binary (or `cargo build --release`)
-2. Run `scripts/setup.sh` to auto-detect Wine/MT5 and write config
-3. Register the MCP server with your coding platform
+#### Option B — Pre-built binaries (no toolchain)
+
+```bash
+# macOS Apple Silicon
+curl -LO https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-macos-arm64.tar.gz
+tar xzf mcp-mt5-quant-macos-arm64.tar.gz   # → mcp-mt5-quant-macos/mt5-quant
+
+# Linux x64
+curl -LO https://github.com/masdevid/mt5-quant/releases/latest/download/mcp-mt5-quant-linux-x64.tar.gz
+tar xzf mcp-mt5-quant-linux-x64.tar.gz     # → mcp-mt5-quant-linux/mt5-quant
+```
+
+Move the binary somewhere on your `PATH` (e.g. `/usr/local/bin` or `~/.local/bin`) so clients can launch it as `mt5-quant`.
+
+#### Option C — Register with your LLM client (copy-paste)
+
+**Claude Code**
+
+```bash
+claude mcp add mt5-quant -- mt5-quant --stdio
+```
+
+**Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{ "mcpServers": { "mt5-quant": { "command": "mt5-quant", "args": ["--stdio"] } } }
+```
+
+**Cursor** — `.cursor/mcp.json` (same JSON shape as Claude Desktop)
+
+```json
+{ "mcpServers": { "mt5-quant": { "command": "mt5-quant", "args": ["--stdio"] } } }
+```
+
+**opencode** — `.opencode/opencode.jsonc`
+
+```jsonc
+{ "mcp": { "mt5-quant": { "type": "local", "command": ["mt5-quant", "--stdio"], "enabled": true } } }
+```
+
+**Codex CLI** — `~/.codex/config.toml`
+
+```toml
+[mcp_servers.mt5-quant]
+command = "mt5-quant"
+args = ["--stdio"]
+```
+
+Then finish setup (auto-detects Wine + MT5 paths):
+
+```bash
+bash scripts/setup.sh
+```
+
+> **Tip:** you can also just ask your LLM coding agent to do all of the above:
+> *"Please install mt5-quant from https://github.com/masdevid/mt5-quant — download or build it, run its `scripts/setup.sh` to auto-detect Wine and MT5 paths, and register it as an MCP server."*
 
 ### First Backtest
 
