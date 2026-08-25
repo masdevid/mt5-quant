@@ -158,14 +158,49 @@ jobs:
           name: linux-binary
           path: dist
 
+      # ── GPG signing of release artifacts (delivery_unsigned) ────────────────
+      # Guarded: only runs when BOTH signing secrets are configured. When they
+      # are absent the release still ships (unsigned) instead of failing — so
+      # forks/contributors without the secrets are not blocked. When present,
+      # each binary gets a detached ASCII-armored signature and the public key
+      # (docs/signing-key.asc) is attached to the release for verification.
+      - name: Import GPG key and sign artifacts
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEYID: EF1CA6A2E2D0CEFF61DC7F080256A0C36A6D5E72
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for f in dist/mcp-mt5-quant-macos-arm64.tar.gz \
+                   dist/mcp-mt5-quant-linux-x64.tar.gz; do
+            gpg --batch --yes --pinentry-mode loopback \
+                --passphrase "$GPG_PASSPHRASE" \
+                --detach-sign --armor -u "$GPG_KEYID" "$f"
+          done
+
+      - name: Build release asset list
+        id: assets
+        run: |
+          {
+            echo "files<<EOF"
+            echo "dist/mcp-mt5-quant-macos-arm64.tar.gz"
+            echo "dist/mcp-mt5-quant-linux-x64.tar.gz"
+            echo "docs/signing-key.asc"
+            if [ -f dist/mcp-mt5-quant-macos-arm64.tar.gz.asc ] && \
+               [ -f dist/mcp-mt5-quant-linux-x64.tar.gz.asc ]; then
+              echo "dist/mcp-mt5-quant-macos-arm64.tar.gz.asc"
+              echo "dist/mcp-mt5-quant-linux-x64.tar.gz.asc"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TAG }}
-          files: |
-            dist/mcp-mt5-quant-macos-arm64.tar.gz
-            dist/mcp-mt5-quant-linux-x64.tar.gz
+          files: ${{ steps.assets.outputs.files }}
           draft: false
           prerelease: false
           generate_release_notes: true

@@ -32,5 +32,15 @@
   "warnings_fixed": "Because Clippy uses `-D warnings`, any warning fails CI and must be fixed before a change can merge.",
   "dynamic_analysis": "Dynamic analysis is performed via cargo-fuzz (libFuzzer) fuzz targets in fuzz/ that exercise the report/metrics parsers with arbitrary input.",
   "dynamic_analysis_enable_assertions": "The cargo-fuzz build enables debug/overflow assertions: fuzz/Cargo.toml sets `[profile.release] debug-assertions = true` (and `[profile.dev] debug-assertions = true`), so debug_assert! checks and integer-overflow traps remain active while libFuzzer feeds arbitrary input; crashes that violate internal invariants are caught as bugs.",
-  "dynamic_analysis_fixed": "Fuzzing findings are triaged and fixed; crashes found by the harness are treated as bugs."
+  "dynamic_analysis_fixed": "Fuzzing findings are triaged and fixed; crashes found by the harness are treated as bugs.",
+
+  "delivery_unsigned": "Release artifacts are GPG-signed in CI (.github/workflows/release.yml) with a dedicated RSA-4096 project key; each GitHub Release attaches the macOS and Linux binaries, their detached ASCII-armored signatures (*.tar.gz.asc), and the public key at docs/signing-key.asc. Verification steps are documented in SECURITY.md.",
+  "vulnerability_report_process": "SECURITY.md defines the vulnerability reporting process: reports accepted via GitHub Security Advisories (preferred) or public GitHub Issues, what to include, expected acknowledgement/triage timelines, and a coordinated-disclosure policy.",
+  "know_secure_design": "SECURITY.md documents secure-development practices: input validation at all 89 tool boundaries, no hardcoded secrets, safe bounded parsing of untrusted MT5 HTML/XML reports, single-MT5-instance least-privilege, cargo-deny/cargo-audit dependency auditing in CI, parser fuzzing, and Wine/MT5 isolation.",
+  "know_common_errors": "SECURITY.md lists common implementation errors avoided: integer-overflow (checked arithmetic + fuzz overflow traps), path traversal in .set file handling, UTF-16LE encoding pitfalls, avoiding unsafe, and proper error propagation via Result/?.",
+
+  "crypto_password_storage": "No passwords are stored by the application; the only secrets are a user-provided MT5/Wine path config (gitignored) and an optional release PAT — neither is a password persisted by the project.",
+  "vulnerability_report_private": "No private vulnerability reporting channel is offered; reports are accepted via public GitHub Security Advisories/issues.",
+  "vulnerability_report_response": "No formal fixed-response SLA; handled case-by-case via the public reporting channel.",
+  "release_notes_vulns": "Release notes do not currently track security vulnerabilities separately."
 }

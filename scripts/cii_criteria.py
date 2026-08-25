@@ -2,12 +2,15 @@
 """List incomplete OpenSSF Best Practices criteria and generate a pre-filled edit URL.
 
 Usage:
-  cii_criteria.py <project_id> [section] [--exclude n1,n2,n3]
+   cii_criteria.py <project_id> [section] [--exclude n1,n2,n3] [--na n1,n2,n3]
 
-  section: passing | silver | gold | baseline-1 | baseline-2 | baseline-3
-           (default: passing)
-  --exclude: comma-separated criterion names to SKIP from the pre-filled URL
-             (they stay at their current Unmet/?/N/A in the form).
+   section: passing | silver | gold | baseline-1 | baseline-2 | baseline-3
+            (default: passing)
+   --exclude: comma-separated criterion names to SKIP from the pre-filled URL
+              (they stay at their current Unmet/?/N/A in the form).
+   --na: comma-separated criterion names to mark as N/A in the pre-filled URL
+         (emits <name>_status=N/A with the justification from the JSON).
+
 
 The script fetches the upstream criteria.yml to learn which criteria belong to
 which tier/section, then restricts BOTH the printed incomplete list AND the
@@ -121,11 +124,15 @@ def main():
                         choices=list(SECTION_TO_TIER.keys()))
     parser.add_argument("--exclude", default="",
                         help="Comma-separated criterion names to skip in the URL.")
+    parser.add_argument("--na", default="",
+                        help="Comma-separated criterion names to mark as N/A "
+                             "with the justification from cii_justifications.json.")
     args = parser.parse_args()
 
     project_id = args.project_id
     section = args.section
     exclude = {x.strip() for x in args.exclude.split(",") if x.strip()}
+    na_set = {x.strip() for x in args.na.split(",") if x.strip()}
 
     justifications = load_justifications()
 
@@ -174,23 +181,38 @@ def main():
     for n, c in sorted(na.items()):
         print(f"  - {n}: N/A | note: {c['justification'][:70]}")
 
-    # Build URL params, restricted to the section AND honoring --exclude.
-    # N/A criteria are never pre-filled as Met (they are excluded from `doable`).
+    # Build URL params, restricted to the section AND honoring --exclude /
+    # --na. N/A criteria (already excluded from `doable`) are never pre-filled
+    # as Met; --na criteria that ARE in `doable` are emitted as N/A instead.
     params = []
     for n in sorted(doable):
-        if exclude and n in exclude:
+        if n in exclude:
             continue  # leave at current Unmet/?/N/A in the form
+        if n in na_set:
+            continue  # emitted as N/A below instead of Met
         params.append((f"{n}_status", "Met"))
         params.append((f"{n}_justification",
                        justifications.get(n, "TODO: justify")))
+    # N/A criteria: set status=N/A with a justification from the JSON, but only
+    # when they belong to the targeted section (so the params stay in scope).
+    for n in sorted(na_set):
+        if n in exclude:
+            continue
+        if n not in scoped:
+            continue
+        params.append((f"{n}_status", "N/A"))
+        params.append((f"{n}_justification",
+                       justifications.get(n, "TODO: justify N/A")))
     params.append(("overrides", "*,osps_*"))
     edit_url = f"{BASE}/projects/{project_id}/{section}/edit?{urllib.parse.urlencode(params)}"
     print(f"\n=== Edit URL ({section}"
-          + (f", excluding {sorted(exclude)}" if exclude else "")
-          + f") ===\n{edit_url}")
+           + (f", excluding {sorted(exclude)}" if exclude else "")
+           + (f", N/A {sorted(na_set)}" if na_set else "")
+           + f") ===\n{edit_url}")
     print(f"\nURL param count for _status/_justification pairs: "
           f"{sum(1 for k,_ in params if k.endswith('_status'))}")
-    print("WARNING: pre-fills Unmet/? criteria as 'Met' with a placeholder justification.")
+    print("WARNING: pre-fills Unmet/? criteria as 'Met' (and --na as 'N/A') using "
+          "justifications from cii_justifications.json.")
     print("Review EVERY field before Save; only mark Met what you genuinely satisfy.")
 
 
