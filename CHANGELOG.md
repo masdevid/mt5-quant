@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.34.3] — 2026-08-25
+
+- chore(deps): bump dirs from 5.0.1 to 6.0.0 (#6)
+- chore(deps): bump base64 from 0.22.1 to 0.23.1 (#4)
+- chore(deps): bump rusqlite from 0.31.0 to 0.40.2 (#5)
+- ci(release): generate build provenance attestations for artifacts
+- chore(deps): bump the minor-and-patch group across 1 directory with 7 updates (#3)
+- fix(release): drop [skip ci] from server.json PR so required checks can run
+- docs(readme): fix Scorecard badge, add CI, crates.io, and license badges
+- ci(scorecard): rename invalid 'publish' input to 'publish_results' so results are published
+
+
 ## [1.34.2] — 2026-08-25
 
 - ci(release): publish to crates.io via trusted publishing (OIDC)
