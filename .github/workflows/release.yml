@@ -143,6 +143,11 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
+      # secrets context is NOT available in step-level if: expressions —
+      # referencing it there makes the whole workflow fail validation
+      # (startup-failure runs on every push). Route the check through a
+      # job-level env var instead: env IS readable in if:.
+      HAS_GPG_SECRETS: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -165,7 +170,7 @@ jobs:
       # each binary gets a detached ASCII-armored signature and the public key
       # (docs/signing-key.asc) is attached to the release for verification.
       - name: Import GPG key and sign artifacts
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' && secrets.GPG_PASSPHRASE != '' }}
+        if: env.HAS_GPG_SECRETS == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
