@@ -42,5 +42,8 @@
   "crypto_password_storage": "No passwords are stored by the application; the only secrets are a user-provided MT5/Wine path config (gitignored) and an optional release PAT — neither is a password persisted by the project.",
   "vulnerability_report_private": "No private vulnerability reporting channel is offered; reports are accepted via public GitHub Security Advisories/issues.",
   "vulnerability_report_response": "No formal fixed-response SLA; handled case-by-case via the public reporting channel.",
-  "release_notes_vulns": "Release notes do not currently track security vulnerabilities separately."
+  "release_notes_vulns": "Release notes do not currently track security vulnerabilities separately.",
+
+  "OSPS-AC-03.01": "The `master` primary branch is protected on GitHub: direct pushes are blocked and changes require a pull request with at least one approving review before merge. This enforcement mechanism prevents direct commits to the primary branch, satisfying OSPS-AC-03.01.",
+  "OSPS-AC-03.02": "The `master` primary branch is protected against deletion on GitHub: branch protection disables branch deletion, and a separate deletion-protecting ruleset requires explicit confirmation of intent before any destructive action. This satisfies OSPS-AC-03.02."
 }
