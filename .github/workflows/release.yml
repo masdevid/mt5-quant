@@ -255,6 +255,16 @@ jobs:
   # checks, which github-actions[bot] cannot bypass on a direct push. The PR
   # runs those checks legitimately, then auto-merges once green. This job
   # blocks until the merge lands so mcp-publish reads the patched server.json.
+  #
+  # Bot identity (RELEASE_PAT): when the RELEASE_PAT secret exists (a
+  # fine-grained personal access token owned by masdevid with Contents+PR
+  # write), the branch push and the PR are attributed to masdevid instead of
+  # github-actions[bot]. GitHub only holds pull_request workflows for manual
+  # approval when the PR author is an OUTSIDE contributor — same-owner PRs
+  # run their checks immediately, making releases fully hands-off. Without
+  # the secret everything falls back to GITHUB_TOKEN: the release still
+  # completes, but the server.json PR's required status checks sit in
+  # "action_required" until manually approved once per release.
 
   update-server-json:
     needs: build-mcp-package
@@ -262,6 +272,14 @@ jobs:
     permissions:
       contents: write        # push the ci/* release branch
       pull-requests: write   # create the PR and enable auto-merge
+    env:
+      # Single bot identity used for BOTH the git push and the gh pr calls —
+      # GitHub ties workflow-trigger approval to the PR-authoring identity,
+      # so push and PR must match. Resolves to RELEASE_PAT when configured,
+      # otherwise the default GITHUB_TOKEN, so nothing breaks before the
+      # secret is added. Declared here instead of interpolated inline so the
+      # token never lands on a command line; GitHub masks it in logs anyway.
+      RELEASE_PAT_OR_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -307,6 +325,13 @@ jobs:
         id: commit
         run: |
           BRANCH="ci/server-json-sha-${VERSION}"
+          # Authenticate ALL pushes (stale-branch cleanup + branch upload)
+          # with the SAME identity that creates the PR below: GitHub ties
+          # workflow-trigger approval to the PR author, so a mismatch here
+          # would defeat the RELEASE_PAT hands-off path. Token comes from the
+          # job-level env (never interpolated inline, never echoed).
+          git remote set-url --push origin \
+            "https://x-access-token:${RELEASE_PAT_OR_TOKEN}@github.com/masdevid/mt5-quant.git"
           # Drop any stale branch/PR left over from a previous attempt at
           # this release so every run starts from a clean slate
           git push origin --delete "$BRANCH" 2>/dev/null || true
@@ -339,20 +364,20 @@ jobs:
           # Same rule as above: no CI-skip marker in the title — GitHub
           # honors markers on PR titles too, which would suppress the
           # required checks.
-          GH_TOKEN="${{ github.token }}" gh pr create \
+          GH_TOKEN="$RELEASE_PAT_OR_TOKEN" gh pr create \
             --title "ci: update server.json SHA256 for v${VERSION}" \
             --body "Automated MCP package hash update." \
             --base master \
             --head "$BRANCH"
 
-          GH_TOKEN="${{ github.token }}" gh pr merge "$BRANCH" --auto --squash
+          GH_TOKEN="$RELEASE_PAT_OR_TOKEN" gh pr merge "$BRANCH" --auto --squash
 
           # Block until required checks (build, lint, cargo-deny x4) finish
           # and auto-merge completes — mcp-publish depends on this job and
           # checks out master expecting the patched server.json
           DEADLINE=$((SECONDS + 1800))
           while (( SECONDS < DEADLINE )); do
-            STATE=$(GH_TOKEN="${{ github.token }}" gh pr view "$BRANCH" --json state --jq .state)
+            STATE=$(GH_TOKEN="$RELEASE_PAT_OR_TOKEN" gh pr view "$BRANCH" --json state --jq .state)
             case "$STATE" in
               MERGED)
                 echo "server.json PR merged to master"
