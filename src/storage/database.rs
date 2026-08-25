@@ -367,7 +367,8 @@ impl ReportDb {
         keep_last: usize,
     ) -> Result<Vec<(String, String, Option<String>)>> {
         let conn = self.connect()?;
-        let count: usize = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
+        let count = count as usize;
 
         if count <= keep_last {
             return Ok(Vec::new());
@@ -404,8 +405,8 @@ impl ReportDb {
 
     pub fn count(&self) -> Result<usize> {
         let conn = self.connect()?;
-        let n: usize = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
-        Ok(n)
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))?;
+        Ok(n as usize)
     }
 
     /// Get the latest report by created_at (most recent first)
