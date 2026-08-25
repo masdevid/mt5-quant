@@ -414,52 +414,50 @@ jobs:
 
       - name: Install mcp-publisher
         id: install-publisher
+        env:
+          # Hash-pinned download (OpenSSF Scorecard Pinned-Dependencies):
+          # PUB_SHA256 is the mcp-publisher_linux_amd64.tar.gz entry from
+          # registry_1.8.1_checksums.txt shipped in the same release.
+          # Bump both values together when upgrading.
+          PUB_VERSION: v1.8.1
+          PUB_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
         run: |
-          # Fetch the download URL for linux_amd64 directly from the release assets API
-          # (asset name format changed in v1.6.0 — look it up rather than constructing it)
-          URL=$(curl -sf \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/modelcontextprotocol/registry/releases/latest" \
-            | python3 -c "
-          import sys, json
-          r = json.load(sys.stdin)
-          tag = r['tag_name']
-          assets = r.get('assets', [])
-          match = next((a['browser_download_url'] for a in assets
-                        if 'linux' in a['name'] and 'amd64' in a['name']
-                        and a['name'].endswith('.tar.gz')
-                        and 'sbom' not in a['name']
-                        and 'sigstore' not in a['name']), None)
-          if match:
-              print(match)
-          else:
-              print(f'https://github.com/modelcontextprotocol/registry/releases/download/{tag}/mcp-publisher_linux_amd64.tar.gz', file=sys.stderr)
-              sys.exit(1)
-          " 2>/dev/null)
+          URL="https://github.com/modelcontextprotocol/registry/releases/download/${PUB_VERSION}/mcp-publisher_linux_amd64.tar.gz"
 
-          if [[ -z "$URL" ]]; then
+          echo "Downloading: $URL"
+          if ! curl -fsSL -o "$RUNNER_TEMP/mcp-publisher.tar.gz" "$URL"; then
             echo "installed=false" >> "$GITHUB_OUTPUT"
-            echo "Could not resolve mcp-publisher download URL"
-          else
-            echo "Downloading: $URL"
-            if curl -fsSL -o mcp-publisher.tar.gz "$URL"; then
-              tar -xzf mcp-publisher.tar.gz 2>/dev/null || true
-              BINARY=$(find . -maxdepth 3 -name "mcp-publisher" ! -path "./.git/*" | head -1)
-              if [[ -n "$BINARY" && -f "$BINARY" ]]; then
-                chmod +x "$BINARY"
-                sudo mv "$BINARY" /usr/local/bin/mcp-publisher
-                echo "installed=true" >> "$GITHUB_OUTPUT"
-                echo "Installed: $(mcp-publisher --version 2>/dev/null || echo 'ok')"
-              else
-                echo "installed=false" >> "$GITHUB_OUTPUT"
-                echo "Binary not found in archive"
-              fi
-              rm -f mcp-publisher.tar.gz
-            else
-              echo "installed=false" >> "$GITHUB_OUTPUT"
-              echo "Download failed: $URL"
-            fi
+            echo "Download failed: $URL"
+            exit 0
           fi
+
+          # Never execute unverified bytes: hard-fail the job on any digest
+          # mismatch (upstream re-release or tampering)
+          ACTUAL=$(sha256sum "$RUNNER_TEMP/mcp-publisher.tar.gz" | awk '{print $1}')
+          if [[ "$ACTUAL" != "$PUB_SHA256" ]]; then
+            echo "::error::SHA256 mismatch for mcp-publisher ${PUB_VERSION}: expected ${PUB_SHA256}, got ${ACTUAL}"
+            exit 1
+          fi
+          echo "SHA256 verified: $ACTUAL"
+
+          EXTRACT_DIR="$(mktemp -d)"
+          if ! tar -xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$EXTRACT_DIR"; then
+            rm -rf "$EXTRACT_DIR" "$RUNNER_TEMP/mcp-publisher.tar.gz"
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "Extraction failed"
+            exit 0
+          fi
+
+          if [[ -f "$EXTRACT_DIR/mcp-publisher" ]]; then
+            chmod +x "$EXTRACT_DIR/mcp-publisher"
+            sudo mv "$EXTRACT_DIR/mcp-publisher" /usr/local/bin/mcp-publisher
+            echo "installed=true" >> "$GITHUB_OUTPUT"
+            echo "Installed: $(mcp-publisher --version 2>/dev/null || echo 'ok')"
+          else
+            echo "installed=false" >> "$GITHUB_OUTPUT"
+            echo "Binary not found in archive"
+          fi
+          rm -rf "$EXTRACT_DIR" "$RUNNER_TEMP/mcp-publisher.tar.gz"
 
       - name: Validate server.json before publish
         id: validate
