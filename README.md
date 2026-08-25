@@ -1,6 +1,6 @@
 # MT5-Quant
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/masdevid/mt5-quant/badge)](https://scorecard.dev/viewer/?uri=github.com/masdevid/mt5-quant) [![Rust CI](https://github.com/masdevid/mt5-quant/actions/workflows/rust.yml/badge.svg)](https://github.com/masdevid/mt5-quant/actions/workflows/rust.yml) [![crates.io](https://img.shields.io/crates/v/mt5-quant.svg)](https://crates.io/crates/mt5-quant) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/masdevid/mt5-quant/badge)](https://scorecard.dev/viewer/?uri=github.com/masdevid/mt5-quant) [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/<CII_PROJECT_ID>/badge)](https://bestpractices.coreinfrastructure.org/projects/<CII_PROJECT_ID>) <!-- TODO: replace <CII_PROJECT_ID> with your project number from bestpractices.coreinfrastructure.org after enrolling; badge activates then --> [![Rust CI](https://github.com/masdevid/mt5-quant/actions/workflows/rust.yml/badge.svg)](https://github.com/masdevid/mt5-quant/actions/workflows/rust.yml) [![crates.io](https://img.shields.io/crates/v/mt5-quant.svg)](https://crates.io/crates/mt5-quant) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **MCP server for MT5 strategy development on macOS/Linux.** 89 tools to compile, backtest, analyze, optimize, debug crashes, and manage MQL5 Expert Advisors — no Windows required.
 
