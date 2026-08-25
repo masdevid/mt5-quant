@@ -320,6 +320,18 @@ def fetch_osps_tier_map():
     return tier_map
 
 
+def _osps_field_name(original_id):
+    """Translate a JSON criterion key into the edit-form field name.
+
+    The project JSON API uses dotted names WITH the `OSPS-` prefix
+    (e.g. `OSPS-AC-03.01`), but the bestpractices.dev edit form expects
+    lowercase underscore names retaining the `osps` prefix
+    (e.g. `osps_ac_03_01`). The controller silently ignores unrecognized
+    params, so we must translate dashes and dots to underscores.
+    """
+    return original_id.lower().replace("-", "_").replace(".", "_")
+
+
 def run_osps(project_id, section, exclude, na_set, justifications, args):
     data, criteria = load_project_criteria(project_id)
 
@@ -376,8 +388,8 @@ def run_osps(project_id, section, exclude, na_set, justifications, args):
         justification = justifications.get(n)
         if not justification:
             continue
-        params.append((f"{n}_status", "Met"))
-        params.append((f"{n}_justification", justification))
+        params.append((f"{_osps_field_name(n)}_status", "Met"))
+        params.append((f"{_osps_field_name(n)}_justification", justification))
         prefilled_met.append(n)
 
     # Pre-fill N/A for --na criteria that are in scope and allow N/A.
@@ -393,8 +405,8 @@ def run_osps(project_id, section, exclude, na_set, justifications, args):
             continue
         justification = justifications.get(
             n, criteria.get(n, {}).get("justification") or "TODO: justify N/A")
-        params.append((f"{n}_status", "N/A"))
-        params.append((f"{n}_justification", justification))
+        params.append((f"{_osps_field_name(n)}_status", "N/A"))
+        params.append((f"{_osps_field_name(n)}_justification", justification))
 
     params.append(("overrides", "*,osps_*"))
     edit_url = (f"{BASE}/projects/{project_id}/{section}/edit?"
