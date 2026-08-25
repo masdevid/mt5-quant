@@ -29,5 +29,8 @@
   "vulnerabilities_critical_fixed": "No known unpatched critical vulnerabilities; `cargo-deny` advisories and dependency-review run in CI and dependency updates are monitored.",
   "vulnerabilities_fixed_60_days": "Dependency vulnerabilities are surfaced by `cargo-deny` (advisories) and the dependency-review action in CI, and are updated promptly.",
   "warnings": "CI enforces a warning-free build via `cargo clippy --all-targets -- -D warnings` plus `cargo fmt --check`.",
-  "warnings_fixed": "Because Clippy uses `-D warnings`, any warning fails CI and must be fixed before a change can merge."
+  "warnings_fixed": "Because Clippy uses `-D warnings`, any warning fails CI and must be fixed before a change can merge.",
+  "dynamic_analysis": "Dynamic analysis is performed via cargo-fuzz (libFuzzer) fuzz targets in fuzz/ that exercise the report/metrics parsers with arbitrary input.",
+  "dynamic_analysis_enable_assertions": "The cargo-fuzz build enables debug/overflow assertions: fuzz/Cargo.toml sets `[profile.release] debug-assertions = true` (and `[profile.dev] debug-assertions = true`), so debug_assert! checks and integer-overflow traps remain active while libFuzzer feeds arbitrary input; crashes that violate internal invariants are caught as bugs.",
+  "dynamic_analysis_fixed": "Fuzzing findings are triaged and fixed; crashes found by the harness are treated as bugs."
 }

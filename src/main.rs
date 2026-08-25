@@ -1,24 +1,16 @@
-mod analytics;
-mod compile;
-mod models;
-mod optimization;
-mod pipeline;
-mod storage;
-mod tools;
-
-mod mcp_server;
-
 use anyhow::Result;
 use clap::Parser;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::io::{stdout, Write};
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::models::Config;
-use crate::pipeline::backtest::{BacktestParams, BacktestPipeline};
+use mt5_quant::models::Config;
+use mt5_quant::pipeline::backtest::{BacktestParams, BacktestPipeline};
+use mt5_quant::mcp_server::{McpServer, Notification};
+use mt5_quant::{McpRequest, McpResponse, McpError};
 
 #[derive(Parser)]
 #[command(name = "mt5-quant")]
@@ -43,57 +35,6 @@ struct Cli {
     /// Startup delay for test launch (default: 10)
     #[arg(long)]
     startup_delay: Option<u64>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct McpRequest {
-    jsonrpc: String,
-    id: Option<Value>,
-    method: String,
-    params: Option<Value>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct McpResponse {
-    jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<McpError>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct McpError {
-    code: i32,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ServerInfo {
-    name: String,
-    version: String,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct InitializeResult {
-    protocol_version: String,
-    capabilities: ServerCapabilities,
-    server_info: ServerInfo,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ServerCapabilities {
-    experimental: Value,
-    tools: ToolCapabilities,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ToolCapabilities {
-    list_changed: bool,
 }
 
 #[tokio::main]
@@ -178,9 +119,9 @@ async fn run_test_launch(ea: Option<String>, startup_delay: Option<u64>) -> Resu
 async fn run_stdio_server() -> Result<()> {
     info!("Starting MT5-Quant MCP server on stdio");
 
-    let server = std::sync::Arc::new(mcp_server::McpServer::new());
+    let server = std::sync::Arc::new(McpServer::new());
     let (notification_tx, mut notification_rx) =
-        tokio::sync::mpsc::unbounded_channel::<mcp_server::Notification>();
+        tokio::sync::mpsc::unbounded_channel::<Notification>();
     server.set_notification_sender(notification_tx).await;
 
     // Spawn notification sender task
@@ -254,7 +195,7 @@ async fn run_tcp_server(port: u16) -> Result<()> {
     info!("Starting MT5-Quant MCP server on TCP port {}", port);
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
-    info!("Listening on 127.0.0.1:{}", port);
+    info!("Running TCP server on port {}", port);
 
     loop {
         let (socket, addr) = listener.accept().await?;
@@ -272,7 +213,7 @@ async fn handle_connection(socket: tokio::net::TcpStream) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
-    let server = mcp_server::McpServer::new();
+    let server = McpServer::new();
 
     loop {
         line.clear();

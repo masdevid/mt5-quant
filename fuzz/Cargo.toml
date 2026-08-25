@@ -1,0 +1,33 @@
+[package]
+name = "mt5-quant-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.mt5-quant]
+path = ".."
+
+[[bin]]
+name = "parse_metrics"
+path = "fuzz_targets/parse_metrics.rs"
+test = false
+doc = false
+bench = false
+
+# Enable debug/overflow assertions during fuzzing. cargo-fuzz builds fuzz
+# targets in release mode by default, so we explicitly turn debug-assertions
+# back on for the release profile. This backs the
+# `dynamic_analysis_enable_assertions` CII criterion: any debug_assert! or
+# arithmetic-overflow check inside the crate is active while libFuzzer feeds
+# arbitrary input, so crashes from invariant violations are caught as bugs.
+[profile.release]
+debug-assertions = true
+
+[profile.dev]
+debug-assertions = true
